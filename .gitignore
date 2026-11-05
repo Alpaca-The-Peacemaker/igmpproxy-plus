@@ -22,3 +22,5 @@ src/os.h
 src/igmpproxy
 doc/igmpproxy.8
 doc/igmpproxy.conf.5
+work/
+out/

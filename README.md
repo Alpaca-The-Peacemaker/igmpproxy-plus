@@ -1,14 +1,73 @@
 # igmpproxy-plus
 
-An alternative to [igmpproxy](https://github.com/pali/igmpproxy), forked from 0.4, with full
-control over how fast multicast traffic stops after a receiver leaves, plus plugins for OpenWrt
-(LuCI) and OPNsense.
+**An IGMP proxy that stops multicast the moment you stop watching.**
+igmpproxy-plus is an alternative to [igmpproxy](https://github.com/pali/igmpproxy) for
+OpenWrt and OPNsense. It gives you full control over fast leave and the timers that decide
+how quickly multicast traffic (IPTV and similar) stops after a receiver leaves, and it shows a
+live table of who is watching what.
 
-> **Status:** the daemon passes the namespace tests below (`tools/nstest.py`). The OpenWrt
-> packages are built with the 25.12.6 SDK and run on an x86/64 router with live IPTV traffic.
-> The OPNsense plugin and FreeBSD port have not been built yet. IGMPv3 queries are planned.
+## Install on OpenWrt
 
-### Measured (Linux namespaces, sender at 50 packets/s, `tools/nstest.py`)
+On the router (OpenWrt 24.10 or 25.12), over SSH:
+
+```sh
+wget -O /tmp/install.sh https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases/latest/download/install.sh && sh /tmp/install.sh
+```
+
+The installer detects your OpenWrt version and CPU type, replaces the stock `igmpproxy`
+package, installs the LuCI pages, and keeps your existing `/etc/config/igmpproxy`. You can read
+the script before running it: [install.sh](install.sh).
+
+- Settings: **LuCI → Services → IGMP Proxy**
+- Live group table: `igmpproxy -S`
+- Back to stock igmpproxy: `sh /tmp/install.sh uninstall`
+
+Prebuilt packages cover x86_64, aarch64 (cortex-a53, cortex-a72, generic), arm (cortex-a7,
+cortex-a9, cortex-a15), mips_24kc and mipsel_24kc. Other routers can build from source, see
+[Building](#building). OPNsense: see [OPNsense](#opnsense-freebsd-build-host-with-the-same-major-version-as-opnsense-eg-freebsd-14).
+
+## Why igmpproxy-plus exists
+
+igmpproxy has quietly done its job on countless home routers for about twenty years. It is
+small, dependable, and it is what OpenWrt and OPNsense ship as their IGMP proxy.
+
+The trouble started with IPTV. When you change channel, the TV leaves the old multicast group
+and joins the new one. With igmpproxy 0.4 the old channel keeps flowing into the LAN for around
+20 seconds after the TV has left: the last member query interval is fixed at 10 seconds in the
+source, timers run in whole seconds, and the `quickleave` option only hurries the *upstream*
+leave, not the traffic going to your LAN. Zap through a few channels and several full streams
+are running at once, which is exactly what saturates Wi-Fi and slower links. There was no
+setting to change any of it.
+
+Making it fast needed more than a tweak: a new timer engine in milliseconds, leaves handled per
+interface, exact tracking of which device watches what, and new defaults. That changes how the
+proxy behaves, and existing igmpproxy users rely on the way it behaves today. So instead of
+asking the igmpproxy project to take on a rewrite of its core, these changes live in a separate
+project that can be installed *instead of* igmpproxy when you want them, and left alone when you
+don't. igmpproxy itself stays exactly as it is.
+
+### Credits
+
+igmpproxy-plus is built on the work of the people below. Their code, copyright notices and
+full commit history are kept in this repository, as the GPL asks and as they deserve.
+
+- **Johnny Egeland** wrote igmpproxy in 2005.
+- **Pali Rohár** and the igmpproxy contributors maintained and improved it for many years at
+  [pali/igmpproxy](https://github.com/pali/igmpproxy). Every one of them is in this
+  repository's history.
+- **Carsten Schill** wrote smcroute 0.92, and **the Board of Trustees of Leland Stanford Junior
+  University** published mrouted 3.9-beta3. igmpproxy is derived from both.
+- The **OpenWrt** and **OPNsense** projects, whose igmpproxy packages and plugin showed how it
+  should fit into each system.
+
+igmpproxy-plus is an independent project. It is not affiliated with or endorsed by the
+igmpproxy project or its authors. Please report problems with igmpproxy-plus
+[here](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/issues), not upstream.
+
+## How fast is it
+
+Measured with `tools/nstest.py`: Linux network namespaces, a sender at 50 packets/s, and two
+receivers on one LAN segment. The time is how long multicast keeps arriving after a leave.
 
 | Configuration | Traffic after the only receiver leaves | Second receiver on the same segment when the first leaves |
 |---|---|---|
@@ -19,12 +78,12 @@ control over how fast multicast traffic stops after a receiver leaves, plus plug
 | plus, `fastleave on` | **0 s** | ~1 s gap until it answers the group query |
 | plus, `fastleave auto` | **0 s** | no gap (both hosts tracked) |
 
-Note: igmpproxy sends IGMPv2 queries, so hosts run in IGMPv2 mode. In v2, a host that hears
+Note: like igmpproxy, this version sends IGMPv2 queries, so hosts run in IGMPv2 mode. In v2, a host that hears
 another host's report for the same group stays quiet and later sends no leave. On a shared
 segment without IGMP snooping, `auto` may therefore not know about every host. Use `off` with a
 short interval there, or `on` if a short dip for other viewers is acceptable.
 
-## Why stock igmpproxy leaves slowly
+## What changed compared to igmpproxy 0.4
 
 | Stock igmpproxy 0.4 | igmpproxy-plus |
 |---|---|
@@ -117,7 +176,14 @@ echo "src-link igmpplus $PWD/igmpproxy-plus/openwrt" >> feeds.conf.default
 make package/igmpproxy-plus/compile package/luci-app-igmpproxy-plus/compile V=s
 ```
 
-To build from a local checkout instead of a release, add
+Or let the script fetch the right SDK and build both packages from your checkout (this is what
+the release workflow runs for every target):
+
+```sh
+sh tools/openwrt-build.sh 25.12.6 mediatek/filogic out    # release, target/subtarget, output dir
+```
+
+To build from a local checkout inside your own SDK instead of a release, add
 `USE_SOURCE_DIR=/path/to/igmpproxy-plus` to the `make package/igmpproxy-plus/compile` line.
 
 On the router: remove `igmpproxy`, then install `igmpproxy-plus` and `luci-app-igmpproxy-plus`
@@ -137,19 +203,6 @@ On OPNsense: uninstall `os-igmp-proxy`, run `pkg add` on both packages, and the 
 under **Services → IGMP Proxy Plus** (Settings and Status). You still need firewall rules that
 allow IGMP and the multicast UDP traffic, with "allow options" set, just like with the stock
 plugin.
-
-## Credits
-
-igmpproxy-plus builds on the work of the igmpproxy authors and keeps their full history and
-copyright notices:
-
-- **Johnny Egeland**, who wrote igmpproxy
-- **Pali Rohár** and the igmpproxy contributors, who maintained it
-  ([pali/igmpproxy](https://github.com/pali/igmpproxy))
-- **Carsten Schill** (smcroute) and the **mrouted** authors, whose code igmpproxy derives from
-
-This is an independent fork, not endorsed by or affiliated with the igmpproxy project. Please
-report problems with igmpproxy-plus here, not to the upstream project.
 
 ## Roadmap
 
