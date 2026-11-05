@@ -77,7 +77,7 @@ jobs:
           merge-multiple: true
       - name: Add installer and checksums
         run: |
-          cp install.sh assets/
+          cp openwrt/install.sh assets/install.sh
           cd assets && sha256sum * > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:

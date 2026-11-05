@@ -16,7 +16,7 @@ wget -O /tmp/install.sh https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/
 
 The installer detects your OpenWrt version and CPU type, replaces the stock `igmpproxy`
 package, installs the LuCI pages, and keeps your existing `/etc/config/igmpproxy`. You can read
-the script before running it: [install.sh](install.sh).
+the script before running it: [install.sh](openwrt/install.sh).
 
 - Settings: **LuCI → Services → IGMP Proxy**
 - Live group table: `igmpproxy -S`

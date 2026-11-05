@@ -1,5 +1,5 @@
 PORTNAME=	igmpproxy-plus
-DISTVERSION=	1.0.0
+DISTVERSION=	1.0.1
 CATEGORIES=	net
 
 MAINTAINER=	337338424+Alpaca-The-Peacemaker@users.noreply.github.com
