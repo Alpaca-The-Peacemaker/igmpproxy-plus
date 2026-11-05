@@ -2,7 +2,7 @@ PORTNAME=	igmpproxy-plus
 DISTVERSION=	1.0.1
 CATEGORIES=	net
 
-MAINTAINER=	337338424+Alpaca-The-Peacemaker@users.noreply.github.com
+MAINTAINER=	8hx8dfdss2@privaterelay.appleid.com
 COMMENT=	IGMP proxy with fast leave and multicast leave timer control
 WWW=		https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus
 

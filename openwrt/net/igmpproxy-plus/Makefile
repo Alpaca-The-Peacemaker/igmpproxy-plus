@@ -13,7 +13,7 @@ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/Alpaca-The-Peacemaker/igmpproxy-plus/tar.gz/v$(PKG_VERSION)?
 PKG_HASH:=344db441153043c23576d65128ada0c86357e4e7caeb3499d06b3431197a04ab
 
-PKG_MAINTAINER:=Alpaca_The_Peacemaker <337338424+Alpaca-The-Peacemaker@users.noreply.github.com>
+PKG_MAINTAINER:=Dave Ferreira <8hx8dfdss2@privaterelay.appleid.com>
 PKG_LICENSE:=GPL-2.0-or-later
 PKG_LICENSE_FILES:=COPYING
 PKG_FIXUP:=autoreconf
