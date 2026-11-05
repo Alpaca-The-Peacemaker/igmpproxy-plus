@@ -14,13 +14,30 @@ On the router (OpenWrt 24.10 or 25.12), over SSH:
 wget -O /tmp/install.sh https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases/latest/download/install.sh && sh /tmp/install.sh
 ```
 
-The installer detects your OpenWrt version and CPU type, replaces the stock `igmpproxy`
-package, installs the LuCI pages, and keeps your existing `/etc/config/igmpproxy`. You can read
-the script before running it: [install.sh](openwrt/install.sh).
+The installer detects your OpenWrt version and CPU type, **backs up first**, replaces the stock
+`igmpproxy` package, installs the LuCI pages, and keeps your existing `/etc/config/igmpproxy`.
+If the new version fails to install or does not start, it **rolls back on its own**. You can
+read the script before running it: [install.sh](openwrt/install.sh).
+
+### Rollback and other commands
+
+The installer stays on the router as `igmpproxy-plus-install`:
+
+| Command | What it does |
+|---|---|
+| `igmpproxy-plus-install rollback` | Undo the last install or upgrade: puts back the version you had before (stock igmpproxy or an earlier igmpproxy-plus) and your previous `/etc/config/igmpproxy` |
+| `igmpproxy-plus-install uninstall` | Go back to the stock igmpproxy package, keeping your config |
+| `igmpproxy-plus-install` | Upgrade to the latest release (backs up first) |
+| `igmpproxy-plus-install backup` | Save a backup now |
+| `igmpproxy-plus-install status` | Show installed versions, service state and the saved backup |
+
+Backups live in `/etc/igmpproxy-plus-backup/` (your config, the previous version, and whether the
+proxy was running). Each install or upgrade replaces the backup, so rollback goes one step back.
+
+After installing:
 
 - Settings: **LuCI → Services → IGMP Proxy**
 - Live group table: `igmpproxy -S`
-- Back to stock igmpproxy: `sh /tmp/install.sh uninstall`
 
 Prebuilt packages cover x86_64, aarch64 (cortex-a53, cortex-a72, generic), arm (cortex-a7,
 cortex-a9, cortex-a15), mips_24kc and mipsel_24kc. Other routers can build from source, see

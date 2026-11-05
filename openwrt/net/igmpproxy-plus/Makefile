@@ -6,12 +6,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=igmpproxy-plus
-PKG_VERSION:=1.0.1
+PKG_VERSION:=1.0.2
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/Alpaca-The-Peacemaker/igmpproxy-plus/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=344db441153043c23576d65128ada0c86357e4e7caeb3499d06b3431197a04ab
+# The openwrt/packages copy of this Makefile carries the real hash.
+PKG_HASH:=skip
 
 PKG_MAINTAINER:=Dave Ferreira <8hx8dfdss2@privaterelay.appleid.com>
 PKG_LICENSE:=GPL-2.0-or-later
