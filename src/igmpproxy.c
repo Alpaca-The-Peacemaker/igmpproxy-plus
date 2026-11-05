@@ -46,11 +46,15 @@
 
 static const char Usage[] =
 "Usage: igmpproxy [-h] [-n] [-d] [-v [-v]] <configfile>\n"
+"       igmpproxy -t <configfile>\n"
+"       igmpproxy -S [statussocket]\n"
 "\n"
 "   -h   Display this help screen\n"
 "   -n   Do not run as a daemon\n"
 "   -d   Run in debug mode. Output all messages on stderr. Implies -n.\n"
 "   -v   Be verbose. Give twice to see even debug messages.\n"
+"   -t   Check the configuration file and exit.\n"
+"   -S   Print the live group table as JSON (default socket /var/run/igmpproxy.sock).\n"
 "\n"
 PACKAGE_STRING "\n"
 ;
@@ -71,6 +75,9 @@ static int sighandled = 0;
 // Holds the indeces of the upstream IF...
 int     upStreamIfIdx[MAX_UPS_VIFS];
 
+// Daemon start time (monotonic ms)
+msec_t  startTime;
+
 /**
 *   Program main method. Is invoked when the program is started
 *   on commandline. The number of commandline arguments, and a
@@ -80,6 +87,8 @@ int main( int ArgCn, char *ArgVc[] ) {
 
     int c, devnull = -1;
     bool NotAsDaemon = false;
+    bool TestConfig = false;
+    bool StatusClient = false;
 
     struct Config *config = NULL;
     struct passwd *pw = NULL;
@@ -87,8 +96,15 @@ int main( int ArgCn, char *ArgVc[] ) {
     srand(time(NULL) * getpid());
 
     // Parse the commandline options and setup basic settings..
-    while ((c = getopt(ArgCn, ArgVc, "vdnh")) != -1) {
+    while ((c = getopt(ArgCn, ArgVc, "vdnhtS")) != -1) {
         switch (c) {
+        case 't':
+            TestConfig = true;
+            Log2Stderr = true;
+            break;
+        case 'S':
+            StatusClient = true;
+            break;
         case 'n':
             NotAsDaemon = true;
             break;
@@ -112,11 +128,25 @@ int main( int ArgCn, char *ArgVc[] ) {
         }
     }
 
+    if (StatusClient) {
+        exit(controlClient(optind < ArgCn ? ArgVc[optind] : "/var/run/igmpproxy.sock"));
+    }
+
     if (optind != ArgCn - 1) {
         fputs("You must specify the configuration file.\n", stderr);
         exit(1);
     }
     char *configFilePath = ArgVc[optind];
+
+    if (TestConfig) {
+        // loadConfig() exits non-zero on hard errors
+        if (!loadConfig(configFilePath)) {
+            fputs("igmpproxy: configuration is invalid\n", stderr);
+            exit(1);
+        }
+        printf("igmpproxy: configuration OK\n");
+        exit(0);
+    }
 
     // Chech that we are root
     if (geteuid() != 0) {
@@ -270,6 +300,9 @@ int igmpProxyInit(void) {
     initRouteTable();
     // Initialize timer
     callout_init();
+    // Status socket (created before chroot / privilege drop)
+    controlInit();
+    startTime = now_ms();
 
     return 1;
 }
@@ -281,6 +314,7 @@ void igmpProxyCleanUp(void) {
     my_log( LOG_DEBUG, 0, "clean handler called" );
 
     free_all_callouts();    // No more timeouts.
+    controlCleanUp();       // Remove status socket.
     clearAllRoutes();       // Remove all routes.
     disableMRouter();       // Disable the multirout API
 }
@@ -289,112 +323,80 @@ void igmpProxyCleanUp(void) {
 *   Main daemon loop.
 */
 void igmpProxyRun(void) {
-    // Get the config.
     struct Config *config = getCommonConfig();
-    // Set some needed values.
-    register int recvlen;
-    int     MaxFD, Rt, secs;
+    int     recvlen;
+    int     MaxFD, Rt, ctl;
+    long    waitMs;
     fd_set  ReadFDS;
     socklen_t dummy = 0;
-    struct  timespec  curtime, lasttime, difftime, tv;
-    // The timeout is a pointer in order to set it to NULL if nessecary.
-    struct  timespec  *timeout = &tv;
-
-    // Initialize timer vars
-    difftime.tv_nsec = 0;
-    clock_gettime(CLOCK_MONOTONIC, &curtime);
-    lasttime = curtime;
+    struct  timespec tv;
+    msec_t  now, nextRoute = 0;
 
     // First thing we send a membership query in downstream VIF's...
     sendGeneralMembershipQuery();
 
-    // Loop until the end...
     for (;;) {
 
-        // Process signaling...
-        if (sighandled) {
-            if (sighandled & GOT_SIGINT) {
-                sighandled &= ~GOT_SIGINT;
-                my_log(LOG_NOTICE, 0, "Got a interrupt signal. Exiting.");
-                break;
-            }
+        if (sighandled & GOT_SIGINT) {
+            sighandled &= ~GOT_SIGINT;
+            my_log(LOG_NOTICE, 0, "Got a interrupt signal. Exiting.");
+            break;
         }
 
         /* aimwang: call rebuildIfVc */
         if (config->rescanVif)
             rebuildIfVc();
 
-        // Prepare timeout...
-        secs = timer_nextTimer();
-        if(secs == -1) {
-            timeout = NULL;
-        } else {
-            timeout->tv_nsec = 0;
-            timeout->tv_sec = (secs > 3) ? 3 : secs; // aimwang: set max timeout
+        // Wait until the next callout or group timer, at most 1 s when
+        // rescanning interfaces, otherwise 3 s (keeps signal latency low).
+        now = now_ms();
+        waitMs = timer_nextTimer(now);
+        if (nextRoute) {
+            long r = nextRoute > now ? (long)(nextRoute - now) : 0;
+            if (waitMs < 0 || r < waitMs)
+                waitMs = r;
         }
-
-        // Prepare for select.
-        MaxFD = MRouterFD;
+        if (waitMs < 0 || waitMs > (config->rescanVif ? 1000 : 3000))
+            waitMs = config->rescanVif ? 1000 : 3000;
+        tv.tv_sec = waitMs / 1000;
+        tv.tv_nsec = (waitMs % 1000) * 1000000L;
 
         FD_ZERO( &ReadFDS );
         FD_SET( MRouterFD, &ReadFDS );
+        MaxFD = MRouterFD;
+        ctl = controlFd();
+        if (ctl >= 0) {
+            FD_SET(ctl, &ReadFDS);
+            if (ctl > MaxFD)
+                MaxFD = ctl;
+        }
 
-        // wait for input
-        Rt = pselect( MaxFD +1, &ReadFDS, NULL, NULL, timeout, NULL );
+        Rt = pselect( MaxFD +1, &ReadFDS, NULL, NULL, &tv, NULL );
 
-        // log and ignore failures
         if( Rt < 0 ) {
-            my_log( LOG_WARNING, errno, "select() failure" );
+            if (errno != EINTR)
+                my_log( LOG_WARNING, errno, "select() failure" );
             continue;
         }
-        else if( Rt > 0 ) {
-
-            // Read IGMP request, and handle it...
+        if( Rt > 0 ) {
             if( FD_ISSET( MRouterFD, &ReadFDS ) ) {
-
                 recvlen = recvfrom(MRouterFD, recv_buf, RECV_BUF_SIZE,
                                    0, NULL, &dummy);
                 if (recvlen < 0) {
                     if (errno != EINTR) my_log(LOG_ERR, errno, "recvfrom");
-                    continue;
+                } else {
+                    acceptIgmp(recvlen);
                 }
-
-                acceptIgmp(recvlen);
             }
+            if (ctl >= 0 && FD_ISSET(ctl, &ReadFDS))
+                controlAccept();
         }
 
-        // At this point, we can handle timeouts...
-        do {
-            /*
-             * If the select timed out, then there's no other
-             * activity to account for and we don't need to
-             * call gettimeofday.
-             */
-            if (Rt == 0) {
-                curtime.tv_sec = lasttime.tv_sec + secs;
-                curtime.tv_nsec = lasttime.tv_nsec;
-                Rt = -1; /* don't do this next time through the loop */
-            } else {
-                clock_gettime(CLOCK_MONOTONIC, &curtime);
-            }
-            difftime.tv_sec = curtime.tv_sec - lasttime.tv_sec;
-            difftime.tv_nsec += curtime.tv_nsec - lasttime.tv_nsec;
-            while (difftime.tv_nsec > 1000000000) {
-                difftime.tv_sec++;
-                difftime.tv_nsec -= 1000000000;
-            }
-            if (difftime.tv_nsec < 0) {
-                difftime.tv_sec--;
-                difftime.tv_nsec += 1000000000;
-            }
-            lasttime = curtime;
-            if (secs == 0 || difftime.tv_sec > 0)
-                age_callout_queue(difftime.tv_sec);
-            secs = -1;
-        } while (difftime.tv_sec > 0);
-
+        // Handle all timers that are due.
+        now = now_ms();
+        callout_run(now);
+        nextRoute = routeTableTick(now);
     }
-
 }
 
 /*

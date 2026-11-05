@@ -147,7 +147,7 @@ void rebuildIfVc () {
             }
             Dp->allowednets->next = NULL;
             Dp->state         = IF_STATE_DOWNSTREAM;
-            Dp->robustness    = DEFAULT_ROBUSTNESS;
+            ifTuningDefaults(Dp);
             Dp->threshold     = DEFAULT_THRESHOLD;   /* ttl limit */
             Dp->ratelimit     = DEFAULT_RATELIMIT;
         }
@@ -317,7 +317,7 @@ void buildIfVc(void) {
 
             // Set the default params for the IF...
             IfDescEp->state         = config->defaultInterfaceState;
-            IfDescEp->robustness    = DEFAULT_ROBUSTNESS;
+            ifTuningDefaults(IfDescEp);
             IfDescEp->threshold     = DEFAULT_THRESHOLD;   /* ttl limit */
             IfDescEp->ratelimit     = DEFAULT_RATELIMIT;
 
@@ -398,11 +398,13 @@ struct IfDesc *getIfByAddress( uint32_t ipaddr ) {
 */
 struct IfDesc *getIfByVifIndex( unsigned vifindex ) {
     struct IfDesc       *Dp;
-    if(vifindex>0) {
-        for ( Dp = IfDescVc; Dp < IfDescEp; Dp++ ) {
-            if(Dp->index == vifindex) {
-                return Dp;
-            }
+    // igmpproxy-plus: VIF 0 is a valid index (upstream skipped it). Interfaces
+    // without a VIF carry (unsigned)-1 and never match.
+    if (vifindex == (unsigned)-1)
+        return NULL;
+    for ( Dp = IfDescVc; Dp < IfDescEp; Dp++ ) {
+        if(Dp->index == vifindex && Dp->state != IF_STATE_DISABLED) {
+            return Dp;
         }
     }
     return NULL;

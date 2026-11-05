@@ -1,0 +1,94 @@
+<form>
+    <field>
+        <id>interface.enabled</id>
+        <label>Enabled</label>
+        <type>checkbox</type>
+    </field>
+    <field>
+        <id>interface.interface</id>
+        <label>Interface</label>
+        <type>dropdown</type>
+    </field>
+    <field>
+        <id>interface.direction</id>
+        <label>Direction</label>
+        <type>dropdown</type>
+        <help>Upstream faces the multicast source (WAN / IPTV VLAN). Downstream faces the receivers.</help>
+    </field>
+    <field>
+        <id>interface.description</id>
+        <label>Description</label>
+        <type>text</type>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Leave behaviour (downstream only)</label>
+    </field>
+    <field>
+        <id>interface.fastleave</id>
+        <label>Fast leave</label>
+        <type>dropdown</type>
+        <help>Overrides the general fast leave setting for this interface.</help>
+    </field>
+    <field>
+        <id>interface.last_member_interval</id>
+        <label>Last member query interval (ms)</label>
+        <type>text</type>
+        <hint>general setting</hint>
+    </field>
+    <field>
+        <id>interface.last_member_count</id>
+        <label>Last member query count</label>
+        <type>text</type>
+        <hint>general setting</hint>
+    </field>
+    <field>
+        <id>interface.robustness</id>
+        <label>Robustness</label>
+        <type>text</type>
+        <hint>general setting</hint>
+    </field>
+    <field>
+        <id>interface.group_timeout</id>
+        <label>Group membership timeout (s)</label>
+        <type>text</type>
+        <hint>computed</hint>
+        <help>How long a group stays forwarded without a report. Empty = robustness x query interval + response interval.</help>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Filters</label>
+        <collapse>true</collapse>
+    </field>
+    <field>
+        <id>interface.altnet</id>
+        <label>Allowed source networks</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>Upstream: networks the multicast sources may come from, e.g. 0.0.0.0/0.</help>
+    </field>
+    <field>
+        <id>interface.whitelist</id>
+        <label>Group whitelist</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>Only these groups are proxied on this interface.</help>
+    </field>
+    <field>
+        <id>interface.blacklist</id>
+        <label>Group blacklist</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>Never proxy these groups on this interface, e.g. 239.255.255.250/32 (SSDP).</help>
+    </field>
+    <field>
+        <id>interface.threshold</id>
+        <label>TTL threshold</label>
+        <type>text</type>
+        <hint>1</hint>
+        <advanced>true</advanced>
+    </field>
+</form>

@@ -1,0 +1,2 @@
+igmpproxy-plus.conf:/usr/local/etc/igmpproxy-plus.conf
+rc.conf.d:/etc/rc.conf.d/igmpproxy_plus

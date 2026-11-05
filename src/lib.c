@@ -143,3 +143,12 @@ uint16_t inetChksum(uint16_t *addr, int len) {
     answer = ~sum;                      /* truncate to 16 bits */
     return(answer);
 }
+
+/*
+ * Monotonic clock in milliseconds.
+ */
+msec_t now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (msec_t)ts.tv_sec * 1000 + (msec_t)(ts.tv_nsec / 1000000);
+}

@@ -66,15 +66,123 @@ user.
 
 
 .B quickleave
-.RS 
-Enables quickleave mode. In this mode the daemon will send a Leave IGMP message
-upstream as soon as it receives a Leave message for any downstream interface.
-The daemon will then ask for Membership reports on the downstream interfaces, 
-and if a report is received the group is joined again upstream. Normally this
-is not noticed at all by clients on the downstream networks. If it's vital
-that the daemon should act exactly as a real multicast client on the upstream
-interface, this function should not be used. Disabling this function increases
-the risk of bandwidth saturation.
+.RS
+Legacy option, same as
+.BR "fastleave auto" .
+.RE
+
+.SH TIMER AND FAST LEAVE OPTIONS (igmpproxy-plus)
+Times accept a unit:
+.I 500ms ,
+.I 2s
+(or a bare number of seconds, fractions allowed) and
+.I 2m .
+The options in this section are global and must appear before the first
+.BR phyint .
+The ones marked (also phyint) can be repeated inside a
+.B phyint
+block to override the global value for that downstream interface.
+
+.B fastleave
+.IR off | on | auto
+(also phyint)
+.RS
+What happens when a host leaves a group.
+.B off
+(default) follows RFC 2236: the proxy sends
+.B lastmembercount
+group specific queries
+.B lastmemberinterval
+apart and stops forwarding on that interface if nobody answers.
+.B on
+stops forwarding on that interface immediately; the queries are still sent so
+other receivers on the same segment re-join within milliseconds.
+.B auto
+stops immediately when the leaving host was the last host the proxy saw
+reporting on that interface, otherwise it behaves like
+.BR off .
+Host tracking needs hosts to see each other's reports suppressed, which is the
+case on a switch with IGMP snooping.
+.RE
+
+.B lastmemberinterval
+.I time
+(also phyint)
+.RS
+Time between last member queries, 100ms to 25.5s. Default 1s (stock igmpproxy
+used 10s).
+.RE
+
+.B lastmembercount
+.I n
+(also phyint)
+.RS
+Number of last member queries, 1 to 10. Default: robustness.
+.RE
+
+.B robustness
+.I n
+(also phyint)
+.RS
+1 to 7, default 2. Group membership timeout is
+robustness * queryinterval + queryresponseinterval.
+.RE
+
+.B queryinterval
+.I time
+.RS
+Interval between general queries, default 125s.
+.RE
+
+.B queryresponseinterval
+.I time
+.RS
+Max response time advertised in general queries, 1s to 25.5s, default 10s.
+.RE
+
+.B startupqueryinterval
+.I time
+,
+.B startupquerycount
+.I n
+.RS
+General queries sent right after start. Defaults: queryinterval/4 and robustness.
+.RE
+
+.B grouptimeout
+.I time
+(phyint only)
+.RS
+Overrides the computed group membership timeout on that interface.
+.RE
+
+.B upstreamleavedelay
+.I time
+.RS
+Keep the upstream membership this long after the last downstream member is
+gone, 0 (default) to 5m. A join inside this window resumes forwarding at once
+without a new upstream join.
+.RE
+
+.B hostlimit
+.I n
+.RS
+Hosts tracked per group per interface, default 256. Beyond it auto fast leave
+falls back to the RFC behaviour for that group and interface.
+.RE
+
+.B controlsocket
+.IR path | none
+.RS
+UNIX socket that returns the live group table as JSON, default
+/var/run/igmpproxy.sock. Read it with
+.BR "igmpproxy -S" .
+.RE
+
+.B hashtablesize
+.I size
+.RS
+Obsolete, accepted and ignored.
 .RE
 
 

@@ -129,10 +129,19 @@ void my_log( int Serverity, int Errno, const char *FmtSt, ... );
 #define DEFAULT_THRESHOLD      1
 #define DEFAULT_RATELIMIT      0
 
-// Define timer constants (in seconds...)
-#define INTERVAL_QUERY          125
-#define INTERVAL_QUERY_RESPONSE  10
-//#define INTERVAL_QUERY_RESPONSE  10
+// Define timer constants. igmpproxy-plus keeps all timers in milliseconds.
+#define INTERVAL_QUERY              125000  // RFC 2236 Query Interval
+#define INTERVAL_QUERY_RESPONSE      10000  // RFC 2236 Query Response Interval
+#define INTERVAL_LAST_MEMBER_QUERY    1000  // RFC 2236 Last Member Query Interval
+#define DEFAULT_HOST_LIMIT             256  // tracked hosts per group per interface
+
+// Fast leave modes
+#define FASTLEAVE_INHERIT   -1  // per-interface: use global setting
+#define FASTLEAVE_OFF        0  // RFC behaviour: keep forwarding until last member queries time out
+#define FASTLEAVE_ON         1  // stop forwarding on that interface as soon as any leave arrives
+#define FASTLEAVE_AUTO       2  // stop forwarding immediately when the last tracked host leaves
+
+typedef uint64_t msec_t;
 
 #define ROUTESTATE_NOTJOINED            0   // The group corresponding to route is not joined
 #define ROUTESTATE_JOINED               1   // The group corresponding to route is joined
@@ -156,13 +165,17 @@ struct IfDesc {
     short               state;
     struct SubnetList*  allowednets;
     struct SubnetList*  allowedgroups;
-    unsigned int        robustness;
+    unsigned int        robustness;  /* 0 = use global value */
+    int                 fastLeave;   /* FASTLEAVE_* */
+    unsigned int        lastMemberQueryInterval; /* ms, 0 = use global */
+    unsigned int        lastMemberQueryCount;    /* 0 = use global */
+    unsigned int        groupTimeout;            /* ms, 0 = computed GMI */
     unsigned char       threshold;   /* ttl limit */
     unsigned int        ratelimit;
     unsigned int        index;
 };
 
-// Keeps common configuration settings
+// Keeps common configuration settings (all times in milliseconds)
 struct Config {
     unsigned int        robustnessValue;
     unsigned int        queryInterval;
@@ -173,10 +186,14 @@ struct Config {
     // Last member probe...
     unsigned int        lastMemberQueryInterval;
     unsigned int        lastMemberQueryCount;
-    // Set if upstream leave messages should be sent instantly..
-    unsigned short      fastUpstreamLeave;
-    // Size in bytes of hash table of downstream hosts used for fast leave
-    unsigned int        downstreamHostsHashTableSize;
+    // Fast leave mode for downstream interfaces (FASTLEAVE_*)
+    int                 fastLeave;
+    // Delay before the upstream leave is sent once no downstream members remain
+    unsigned int        upstreamLeaveDelay;
+    // Max tracked hosts per group per interface
+    unsigned int        hostLimit;
+    // Path of the status socket, empty = disabled
+    char                controlSocket[108];
     //~ aimwang added
     // Set if nneed to detect new interface.
     unsigned short	rescanVif;
@@ -225,6 +242,12 @@ int getVifIx( struct IfDesc *IfDp );
 int loadConfig(char *configFile);
 void configureVifs(void);
 struct Config *getCommonConfig(void);
+void ifTuningDefaults(struct IfDesc *Dp);
+int ifFastLeave(const struct IfDesc *Dp);
+unsigned int ifLastMemberQueryInterval(const struct IfDesc *Dp);
+unsigned int ifLastMemberQueryCount(const struct IfDesc *Dp);
+unsigned int ifGroupMembershipInterval(const struct IfDesc *Dp);
+const char *fastLeaveName(int mode);
 
 /* igmp.c
 */
@@ -240,6 +263,7 @@ void sendIgmp (uint32_t, uint32_t, int, int, uint32_t, int, int);
 char   *fmtInAdr( char *St, struct in_addr InAdr );
 char   *inetFmt(uint32_t addr, char *s);
 char   *inetFmts(uint32_t addr, uint32_t mask, char *s);
+msec_t  now_ms(void);
 uint16_t inetChksum(uint16_t *addr, int len);
 
 /* kern.c
@@ -258,32 +282,39 @@ void initRouteTable(void);
 void clearAllRoutes(void);
 int insertRoute(uint32_t group, int ifx, uint32_t src);
 int activateRoute(uint32_t group, uint32_t originAddr, int upstrVif);
-void ageActiveRoutes(void);
-void setRouteLastMemberMode(uint32_t group, uint32_t src);
-int lastMemberGroupAge(uint32_t group);
-int interfaceInRoute(int32_t group, int Ix);
+void routeLeave(uint32_t group, int ifx, uint32_t src);
+msec_t routeTableTick(msec_t now);
+void routeTableDumpJson(FILE *f, msec_t now);
 
 /* request.c
  */
 void acceptGroupReport(uint32_t src, uint32_t group);
 void acceptLeaveMessage(uint32_t src, uint32_t group);
 void sendGeneralMembershipQuery(void);
+void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group);
 
-/* callout.c 
+/* control.c
+ */
+void controlInit(void);
+int  controlFd(void);
+void controlAccept(void);
+void controlCleanUp(void);
+int  controlClient(const char *path);
+extern msec_t startTime;
+
+/* callout.c  (all delays in milliseconds)
 */
 typedef void (*timer_f)(void *);
 
 void callout_init(void);
 void free_all_callouts(void);
-void age_callout_queue(int);
-int timer_nextTimer(void);
+void callout_run(msec_t now);
+int timer_nextTimer(msec_t now);
 int timer_setTimer(int, timer_f, void *);
-int timer_clearTimer(int);
-int timer_leftTimer(int);
 
 /* confread.c
  */
-#define MAX_TOKEN_LENGTH    30
+#define MAX_TOKEN_LENGTH    255
 
 int openConfigFile(char *filename);
 void closeConfigFile(void);

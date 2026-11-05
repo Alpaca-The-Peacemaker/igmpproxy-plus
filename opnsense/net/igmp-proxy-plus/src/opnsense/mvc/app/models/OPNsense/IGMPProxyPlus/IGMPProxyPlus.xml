@@ -1,0 +1,162 @@
+<model>
+    <mount>//OPNsense/igmpproxyplus</mount>
+    <description>IGMP Proxy Plus</description>
+    <version>1.0.0</version>
+    <items>
+        <general>
+            <enabled type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </enabled>
+            <fastleave type="OptionField">
+                <Default>off</Default>
+                <Required>Y</Required>
+                <OptionValues>
+                    <off>Off (RFC 2236)</off>
+                    <on>On (immediate)</on>
+                    <auto>Auto (last tracked host)</auto>
+                </OptionValues>
+            </fastleave>
+            <last_member_interval type="IntegerField">
+                <Default>1000</Default>
+                <Required>Y</Required>
+                <MinimumValue>100</MinimumValue>
+                <MaximumValue>25500</MaximumValue>
+                <ValidationMessage>Last member query interval must be between 100 and 25500 ms.</ValidationMessage>
+            </last_member_interval>
+            <last_member_count type="IntegerField">
+                <MinimumValue>1</MinimumValue>
+                <MaximumValue>10</MaximumValue>
+                <ValidationMessage>Last member query count must be between 1 and 10.</ValidationMessage>
+            </last_member_count>
+            <upstream_leave_delay type="IntegerField">
+                <Default>0</Default>
+                <Required>Y</Required>
+                <MinimumValue>0</MinimumValue>
+                <MaximumValue>300000</MaximumValue>
+                <ValidationMessage>Upstream leave delay must be between 0 and 300000 ms.</ValidationMessage>
+            </upstream_leave_delay>
+            <robustness type="IntegerField">
+                <Default>2</Default>
+                <Required>Y</Required>
+                <MinimumValue>1</MinimumValue>
+                <MaximumValue>7</MaximumValue>
+                <ValidationMessage>Robustness must be between 1 and 7.</ValidationMessage>
+            </robustness>
+            <query_interval type="IntegerField">
+                <Default>125</Default>
+                <Required>Y</Required>
+                <MinimumValue>2</MinimumValue>
+                <MaximumValue>3600</MaximumValue>
+                <ValidationMessage>Query interval must be between 2 and 3600 seconds.</ValidationMessage>
+            </query_interval>
+            <query_response_interval type="IntegerField">
+                <Default>10</Default>
+                <Required>Y</Required>
+                <MinimumValue>1</MinimumValue>
+                <MaximumValue>25</MaximumValue>
+                <ValidationMessage>Query response interval must be between 1 and 25 seconds.</ValidationMessage>
+            </query_response_interval>
+            <startup_query_interval type="IntegerField">
+                <MinimumValue>1</MinimumValue>
+                <MaximumValue>3600</MaximumValue>
+                <ValidationMessage>Startup query interval must be between 1 and 3600 seconds.</ValidationMessage>
+            </startup_query_interval>
+            <startup_query_count type="IntegerField">
+                <MinimumValue>0</MinimumValue>
+                <MaximumValue>10</MaximumValue>
+                <ValidationMessage>Startup query count must be between 0 and 10.</ValidationMessage>
+            </startup_query_count>
+            <host_limit type="IntegerField">
+                <Default>256</Default>
+                <Required>Y</Required>
+                <MinimumValue>0</MinimumValue>
+                <MaximumValue>65535</MaximumValue>
+            </host_limit>
+            <igmp_version type="OptionField">
+                <OptionValues>
+                    <v2 value="2">IGMPv2</v2>
+                    <v3 value="3">IGMPv3</v3>
+                </OptionValues>
+            </igmp_version>
+            <proxy_ssdp type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </proxy_ssdp>
+            <verbose type="OptionField">
+                <Default>1</Default>
+                <Required>Y</Required>
+                <OptionValues>
+                    <warn value="1">Warnings</warn>
+                    <info value="2">Info (joins, leaves, fast leave)</info>
+                    <debug value="3">Debug</debug>
+                </OptionValues>
+            </verbose>
+        </general>
+        <interfaces>
+            <interface type="ArrayField">
+                <enabled type="BooleanField">
+                    <Default>1</Default>
+                    <Required>Y</Required>
+                </enabled>
+                <interface type="InterfaceField">
+                    <Required>Y</Required>
+                </interface>
+                <direction type="OptionField">
+                    <Default>downstream</Default>
+                    <Required>Y</Required>
+                    <OptionValues>
+                        <upstream>Upstream</upstream>
+                        <downstream>Downstream</downstream>
+                    </OptionValues>
+                </direction>
+                <fastleave type="OptionField">
+                    <BlankDesc>Use general setting</BlankDesc>
+                    <OptionValues>
+                        <off>Off (RFC 2236)</off>
+                        <on>On (immediate)</on>
+                        <auto>Auto (last tracked host)</auto>
+                    </OptionValues>
+                </fastleave>
+                <last_member_interval type="IntegerField">
+                    <MinimumValue>100</MinimumValue>
+                    <MaximumValue>25500</MaximumValue>
+                    <ValidationMessage>Last member query interval must be between 100 and 25500 ms.</ValidationMessage>
+                </last_member_interval>
+                <last_member_count type="IntegerField">
+                    <MinimumValue>1</MinimumValue>
+                    <MaximumValue>10</MaximumValue>
+                </last_member_count>
+                <robustness type="IntegerField">
+                    <MinimumValue>1</MinimumValue>
+                    <MaximumValue>7</MaximumValue>
+                </robustness>
+                <group_timeout type="IntegerField">
+                    <MinimumValue>1</MinimumValue>
+                    <MaximumValue>7200</MaximumValue>
+                    <ValidationMessage>Group membership timeout must be between 1 and 7200 seconds.</ValidationMessage>
+                </group_timeout>
+                <threshold type="IntegerField">
+                    <MinimumValue>1</MinimumValue>
+                    <MaximumValue>255</MaximumValue>
+                </threshold>
+                <altnet type="NetworkField">
+                    <AsList>Y</AsList>
+                    <AddressFamily>ipv4</AddressFamily>
+                    <NetMaskRequired>Y</NetMaskRequired>
+                </altnet>
+                <whitelist type="NetworkField">
+                    <AsList>Y</AsList>
+                    <AddressFamily>ipv4</AddressFamily>
+                    <NetMaskRequired>Y</NetMaskRequired>
+                </whitelist>
+                <blacklist type="NetworkField">
+                    <AsList>Y</AsList>
+                    <AddressFamily>ipv4</AddressFamily>
+                    <NetMaskRequired>Y</NetMaskRequired>
+                </blacklist>
+                <description type="DescriptionField"/>
+            </interface>
+        </interfaces>
+    </items>
+</model>

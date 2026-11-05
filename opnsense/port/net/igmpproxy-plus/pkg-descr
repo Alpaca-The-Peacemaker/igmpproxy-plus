@@ -1,0 +1,3 @@
+igmpproxy fork with per interface fast leave (off/on/auto), configurable
+last member query interval and count, querier timers, upstream leave
+delay, exact host tracking and a JSON status socket (igmpproxy-plus -S).

@@ -1,0 +1,100 @@
+<form>
+    <field>
+        <id>igmpproxyplus.general.enabled</id>
+        <label>Enable</label>
+        <type>checkbox</type>
+        <help>Enable the IGMP proxy. Add an upstream and at least one downstream interface on the Interfaces tab.</help>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Leave behaviour</label>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.fastleave</id>
+        <label>Fast leave</label>
+        <type>dropdown</type>
+        <help><![CDATA[<b>Off</b>: RFC behaviour, keep forwarding until the last member queries time out (count x interval).<br/><b>On</b>: stop forwarding on that interface as soon as any host leaves. Other hosts on the segment re-join within milliseconds after the follow-up query. Best when each port has one receiver, such as IPTV set-top boxes.<br/><b>Auto</b>: stop at once when the last known host on that interface leaves, otherwise do the RFC check. Needs a switch with IGMP snooping so hosts do not suppress each other's reports.]]></help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.last_member_interval</id>
+        <label>Last member query interval (ms)</label>
+        <type>text</type>
+        <help>Milliseconds between group specific queries after a leave. Stock igmpproxy used 10000 ms. The RFC default is 1000 ms.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.last_member_count</id>
+        <label>Last member query count</label>
+        <type>text</type>
+        <hint>robustness</hint>
+        <help>Queries sent before forwarding stops when fast leave does not apply. Time to stop = count x interval. Empty uses the robustness value.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.upstream_leave_delay</id>
+        <label>Upstream leave delay (ms)</label>
+        <type>text</type>
+        <help>Stay joined upstream this long after the last downstream member is gone. Switching back to a channel inside this window is instant. 0 = leave immediately.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.igmp_version</id>
+        <label>System IGMP version</label>
+        <type>dropdown</type>
+        <help>Sets net.inet.igmp.default_version, used for the upstream joins and leaves. Some IPTV providers need IGMPv2 to see leaves quickly. Empty leaves the system default.</help>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Querier timers</label>
+        <collapse>true</collapse>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.robustness</id>
+        <label>Robustness</label>
+        <type>text</type>
+        <help>Tolerance for lost packets. Group membership timeout = robustness x query interval + response interval.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.query_interval</id>
+        <label>Query interval (s)</label>
+        <type>text</type>
+        <help>Seconds between general queries on downstream interfaces.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.query_response_interval</id>
+        <label>Query response interval (s)</label>
+        <type>text</type>
+        <help>Seconds hosts may wait before answering a general query.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.startup_query_interval</id>
+        <label>Startup query interval (s)</label>
+        <type>text</type>
+        <hint>query interval / 4</hint>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.startup_query_count</id>
+        <label>Startup query count</label>
+        <type>text</type>
+        <hint>robustness</hint>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Advanced</label>
+        <collapse>true</collapse>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.host_limit</id>
+        <label>Tracked hosts limit</label>
+        <type>text</type>
+        <help>Hosts tracked per group per interface. Above it, auto fast leave falls back to the RFC check.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.proxy_ssdp</id>
+        <label>Proxy SSDP (239.255.255.250)</label>
+        <type>checkbox</type>
+        <help>By default UPnP discovery traffic is kept local and never joined upstream. Enable only if you really need SSDP from the upstream network.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.verbose</id>
+        <label>Log level</label>
+        <type>dropdown</type>
+    </field>
+</form>

@@ -1,0 +1,9 @@
+<acl>
+    <page-services-igmpproxyplus>
+        <name>Services: IGMP Proxy Plus</name>
+        <patterns>
+            <pattern>ui/igmpproxyplus/*</pattern>
+            <pattern>api/igmpproxyplus/*</pattern>
+        </patterns>
+    </page-services-igmpproxyplus>
+</acl>

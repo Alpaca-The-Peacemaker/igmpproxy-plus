@@ -34,6 +34,9 @@
 /**
 *   config.c - Contains functions to load and parse config
 *              file, and functions to configure the daemon.
+*
+*   igmpproxy-plus: configurable querier timers, per interface fast leave
+*   and last member query tuning. All times are kept in milliseconds.
 */
 
 #include "igmpproxy.h"
@@ -44,6 +47,13 @@ struct vifconfig {
     short               state;
     int                 ratelimit;
     int                 threshold;
+
+    // Per interface tuning (0 / FASTLEAVE_INHERIT = use global)
+    int                 fastLeave;
+    unsigned int        robustness;
+    unsigned int        lastMemberQueryInterval;
+    unsigned int        lastMemberQueryCount;
+    unsigned int        groupTimeout;
 
     // Keep allowed nets for VIF.
     struct SubnetList*  allowednets;
@@ -61,9 +71,23 @@ struct vifconfig *vifconf;
 // Keeps common settings...
 static struct Config commonConfig;
 
+// Track which derived defaults were set explicitly
+static bool startupIntervalSet, startupCountSet, lmqCountSet;
+
 // Prototypes...
 struct vifconfig *parsePhyintToken(void);
 struct SubnetList *parseSubnetAddress(char *addrstr);
+
+/* Limits in ms. The IGMPv2 max response code is 8 bits of 1/10 s => 25.5 s. */
+#define LMQI_MIN      100
+#define LMQI_MAX    25500
+#define QRI_MIN      1000
+#define QRI_MAX     25500
+#define QI_MIN       2000
+#define QI_MAX    3600000
+#define GT_MIN       1000
+#define GT_MAX    7200000
+#define ULD_MAX    300000
 
 /**
 *   Initializes common config..
@@ -73,24 +97,26 @@ static void initCommonConfig(void) {
     commonConfig.queryInterval = INTERVAL_QUERY;
     commonConfig.queryResponseInterval = INTERVAL_QUERY_RESPONSE;
 
-    // The defaults are calculated from other settings.
-    commonConfig.startupQueryInterval = (unsigned int)(INTERVAL_QUERY / 4);
-    commonConfig.startupQueryCount = DEFAULT_ROBUSTNESS;
+    // Derived from other settings after parsing unless set explicitly.
+    commonConfig.startupQueryInterval = 0;
+    commonConfig.startupQueryCount = 0;
 
-    // Default values for leave intervals...
-    commonConfig.lastMemberQueryInterval = INTERVAL_QUERY_RESPONSE;
+    // RFC 2236 default of 1 s (stock igmpproxy used 10 s here, which is
+    // why leaving a stream took 20+ seconds).
+    commonConfig.lastMemberQueryInterval = INTERVAL_LAST_MEMBER_QUERY;
     commonConfig.lastMemberQueryCount    = DEFAULT_ROBUSTNESS;
 
-    // If 1, a leave message is sent upstream on leave messages from downstream.
-    commonConfig.fastUpstreamLeave = 0;
-
-    // Default size of hash table is 32 bytes (= 256 bits) and can store
-    // up to the 256 non-collision hosts, approximately half of /24 subnet
-    commonConfig.downstreamHostsHashTableSize = 32;
+    commonConfig.fastLeave = FASTLEAVE_OFF;
+    commonConfig.upstreamLeaveDelay = 0;
+    commonConfig.hostLimit = DEFAULT_HOST_LIMIT;
+    snprintf(commonConfig.controlSocket, sizeof(commonConfig.controlSocket),
+             "%s", "/var/run/igmpproxy.sock");
 
     // aimwang: default value
     commonConfig.defaultInterfaceState = IF_STATE_DISABLED;
     commonConfig.rescanVif = 0;
+
+    startupIntervalSet = startupCountSet = lmqCountSet = false;
 }
 
 /**
@@ -98,6 +124,122 @@ static void initCommonConfig(void) {
 */
 struct Config *getCommonConfig(void) {
     return &commonConfig;
+}
+
+/*
+ * Per interface accessors - fall back to the global value.
+ */
+void ifTuningDefaults(struct IfDesc *Dp) {
+    Dp->robustness = 0;
+    Dp->fastLeave = FASTLEAVE_INHERIT;
+    Dp->lastMemberQueryInterval = 0;
+    Dp->lastMemberQueryCount = 0;
+    Dp->groupTimeout = 0;
+}
+
+int ifFastLeave(const struct IfDesc *Dp) {
+    if (Dp && Dp->fastLeave != FASTLEAVE_INHERIT)
+        return Dp->fastLeave;
+    return commonConfig.fastLeave;
+}
+
+unsigned int ifLastMemberQueryInterval(const struct IfDesc *Dp) {
+    if (Dp && Dp->lastMemberQueryInterval)
+        return Dp->lastMemberQueryInterval;
+    return commonConfig.lastMemberQueryInterval;
+}
+
+unsigned int ifLastMemberQueryCount(const struct IfDesc *Dp) {
+    if (Dp && Dp->lastMemberQueryCount)
+        return Dp->lastMemberQueryCount;
+    return commonConfig.lastMemberQueryCount;
+}
+
+/**
+ * Group Membership Interval: how long a group stays forwarded on an
+ * interface without hearing a report. RFC 2236: robustness * QI + QRI.
+ */
+unsigned int ifGroupMembershipInterval(const struct IfDesc *Dp) {
+    unsigned int rv;
+    if (Dp && Dp->groupTimeout)
+        return Dp->groupTimeout;
+    rv = (Dp && Dp->robustness) ? Dp->robustness : commonConfig.robustnessValue;
+    return rv * commonConfig.queryInterval + commonConfig.queryResponseInterval;
+}
+
+const char *fastLeaveName(int mode) {
+    switch (mode) {
+    case FASTLEAVE_ON:   return "on";
+    case FASTLEAVE_AUTO: return "auto";
+    case FASTLEAVE_OFF:  return "off";
+    default:             return "inherit";
+    }
+}
+
+/*
+ * Token helpers. A missing value or a bad number is fatal (my_log with
+ * LOG_ERR exits), so a broken config never starts a half configured proxy.
+ */
+static char *needValue(const char *key) {
+    char *token = nextConfigToken();
+    if (token == NULL)
+        my_log(LOG_ERR, 0, "Config: '%s' needs a value", key);
+    return token;
+}
+
+static unsigned int parseUInt(const char *key, const char *token,
+                              unsigned int min, unsigned int max) {
+    char *end;
+    long v = strtol(token, &end, 10);
+    if (*token == '\0' || *end != '\0' || v < (long)min || v > (long)max)
+        my_log(LOG_ERR, 0, "Config: '%s' must be %u..%u (got '%s')",
+               key, min, max, token);
+    return (unsigned int)v;
+}
+
+/**
+ * Parses a time value into milliseconds. Accepted forms:
+ *   "2" or "2s" (seconds), "0.5" or "1.5s", "500ms", "2m".
+ */
+static unsigned int parseTime(const char *key, const char *token,
+                              unsigned int minMs, unsigned int maxMs) {
+    char *end;
+    double v = strtod(token, &end);
+    double ms;
+
+    if (end == token || v < 0)
+        goto bad;
+    if (strcmp(end, "ms") == 0)
+        ms = v;
+    else if (*end == '\0' || strcmp(end, "s") == 0)
+        ms = v * 1000.0;
+    else if (strcmp(end, "m") == 0 || strcmp(end, "min") == 0)
+        ms = v * 60000.0;
+    else
+        goto bad;
+
+    ms += 0.5;
+    if (ms < minMs || ms > (double)maxMs + 0.5)
+        goto bad;
+    return (unsigned int)ms;
+
+bad:
+    my_log(LOG_ERR, 0, "Config: '%s' must be %ums..%ums, e.g. 500ms or 2s (got '%s')",
+           key, minMs, maxMs, token);
+    return 0;
+}
+
+static int parseFastLeave(const char *token) {
+    if (!strcmp(token, "off") || !strcmp(token, "0") || !strcmp(token, "disabled"))
+        return FASTLEAVE_OFF;
+    if (!strcmp(token, "on") || !strcmp(token, "1") || !strcmp(token, "immediate"))
+        return FASTLEAVE_ON;
+    if (!strcmp(token, "auto") || !strcmp(token, "tracked"))
+        return FASTLEAVE_AUTO;
+    if (!strcmp(token, "inherit") || !strcmp(token, "default"))
+        return FASTLEAVE_INHERIT;
+    my_log(LOG_ERR, 0, "Config: fastleave must be off, on, auto or inherit (got '%s')", token);
+    return FASTLEAVE_OFF;
 }
 
 /**
@@ -108,6 +250,7 @@ int loadConfig(char *configFile) {
     struct vifconfig  *tmpPtr;
     struct vifconfig  **currPtr = &vifconf;
     char *token;
+    bool seenPhyint = false;
 
     // Initialize common config
     initCommonConfig();
@@ -125,114 +268,142 @@ int loadConfig(char *configFile) {
 
     // Loop until all configuration is read.
     while ( token != NULL ) {
-        // Check token...
+        char key[MAX_TOKEN_LENGTH];
+        snprintf(key, sizeof(key), "%s", token);
+
         if(strcmp("phyint", token)==0) {
-            // Got a phyint token... Call phyint parser
             my_log(LOG_DEBUG, 0, "Config: Got a phyint token.");
+            seenPhyint = true;
             tmpPtr = parsePhyintToken();
             if(tmpPtr == NULL) {
-                // Unparsable token... Exit...
                 closeConfigFile();
                 my_log(LOG_WARNING, 0, "Unknown token '%s' in configfile", token);
                 return 0;
-            } else {
-
-                my_log(LOG_DEBUG, 0, "IF name : %s", tmpPtr->name);
-                my_log(LOG_DEBUG, 0, "Next ptr : %x", tmpPtr->next);
-                my_log(LOG_DEBUG, 0, "Ratelimit : %d", tmpPtr->ratelimit);
-                my_log(LOG_DEBUG, 0, "Threshold : %d", tmpPtr->threshold);
-                my_log(LOG_DEBUG, 0, "State : %d", tmpPtr->state);
-                my_log(LOG_DEBUG, 0, "Allowednet ptr : %x", tmpPtr->allowednets);
-
-                // Insert config, and move temppointer to next location...
-                *currPtr = tmpPtr;
-                currPtr = &tmpPtr->next;
             }
-        }
-        else if(strcmp("quickleave", token)==0) {
-            // Got a quickleave token....
-            my_log(LOG_DEBUG, 0, "Config: Quick leave mode enabled.");
-            commonConfig.fastUpstreamLeave = 1;
+            my_log(LOG_DEBUG, 0, "IF %s: state %d, fastleave %s",
+                   tmpPtr->name, tmpPtr->state, fastLeaveName(tmpPtr->fastLeave));
 
-            // Read next token...
-            token = nextConfigToken();
+            // Insert config, and move temppointer to next location...
+            *currPtr = tmpPtr;
+            currPtr = &tmpPtr->next;
+
+            // Continue with the token that the phyint parser did not recognize.
+            token = getCurrentConfigToken();
             continue;
+        }
+
+        if (seenPhyint && (
+            !strcmp("robustness", token) || !strcmp("lastmemberinterval", token) ||
+            !strcmp("lastmembercount", token) || !strcmp("fastleave", token))) {
+            // These names are also per interface options; after a phyint
+            // they would have been consumed by it, so this cannot happen
+            // unless the phyint parser stopped early. Be explicit anyway.
+            my_log(LOG_ERR, 0, "Config: global '%s' must appear before the first phyint", token);
+        }
+
+        if(strcmp("quickleave", token)==0) {
+            // Legacy option: maps to tracked fast leave.
+            my_log(LOG_DEBUG, 0, "Config: quickleave -> fastleave auto.");
+            commonConfig.fastLeave = FASTLEAVE_AUTO;
         }
         else if(strcmp("hashtablesize", token)==0) {
-            // Got a hashtablesize token...
-            token = nextConfigToken();
-            my_log(LOG_DEBUG, 0, "Config: hashtablesize for quickleave is %s.", token);
-            if(!commonConfig.fastUpstreamLeave) {
-                closeConfigFile();
-                my_log(LOG_ERR, 0, "Config: hashtablesize is specified but quickleave not enabled.");
-                return 0;
-            }
-            int intToken = atoi(token);
-            if(intToken < 1 || intToken > 536870912) {
-                closeConfigFile();
-                my_log(LOG_ERR, 0, "Config: hashtablesize must be between 1 and 536870912 bytes.");
-                return 0;
-            }
-            commonConfig.downstreamHostsHashTableSize = intToken;
-
-            // Read next token...
-            token = nextConfigToken();
-            continue;
+            // Legacy option: host tracking is exact now.
+            needValue(key);
+            my_log(LOG_NOTICE, 0, "Config: hashtablesize is obsolete and ignored.");
+        }
+        else if(strcmp("fastleave", token)==0) {
+            int m = parseFastLeave(needValue(key));
+            if (m == FASTLEAVE_INHERIT)
+                my_log(LOG_ERR, 0, "Config: global fastleave must be off, on or auto");
+            commonConfig.fastLeave = m;
+        }
+        else if(strcmp("robustness", token)==0) {
+            commonConfig.robustnessValue = parseUInt(key, needValue(key), 1, 7);
+        }
+        else if(strcmp("queryinterval", token)==0) {
+            commonConfig.queryInterval = parseTime(key, needValue(key), QI_MIN, QI_MAX);
+        }
+        else if(strcmp("queryresponseinterval", token)==0) {
+            commonConfig.queryResponseInterval = parseTime(key, needValue(key), QRI_MIN, QRI_MAX);
+        }
+        else if(strcmp("startupqueryinterval", token)==0) {
+            commonConfig.startupQueryInterval = parseTime(key, needValue(key), QRI_MIN, QI_MAX);
+            startupIntervalSet = true;
+        }
+        else if(strcmp("startupquerycount", token)==0) {
+            commonConfig.startupQueryCount = parseUInt(key, needValue(key), 0, 10);
+            startupCountSet = true;
+        }
+        else if(strcmp("lastmemberinterval", token)==0) {
+            commonConfig.lastMemberQueryInterval = parseTime(key, needValue(key), LMQI_MIN, LMQI_MAX);
+        }
+        else if(strcmp("lastmembercount", token)==0) {
+            commonConfig.lastMemberQueryCount = parseUInt(key, needValue(key), 1, 10);
+            lmqCountSet = true;
+        }
+        else if(strcmp("upstreamleavedelay", token)==0) {
+            commonConfig.upstreamLeaveDelay = parseTime(key, needValue(key), 0, ULD_MAX);
+        }
+        else if(strcmp("hostlimit", token)==0) {
+            commonConfig.hostLimit = parseUInt(key, needValue(key), 0, 65535);
+        }
+        else if(strcmp("controlsocket", token)==0) {
+            token = needValue("controlsocket");
+            if (!strcmp(token, "none") || !strcmp(token, "off"))
+                commonConfig.controlSocket[0] = '\0';
+            else if (snprintf(commonConfig.controlSocket, sizeof(commonConfig.controlSocket),
+                              "%s", token) >= (int)sizeof(commonConfig.controlSocket))
+                my_log(LOG_ERR, 0, "Config: controlsocket path too long");
         }
         else if(strcmp("defaultdown", token)==0) {
-            // Got a defaultdown token...
             my_log(LOG_DEBUG, 0, "Config: interface Default as down stream.");
             commonConfig.defaultInterfaceState = IF_STATE_DOWNSTREAM;
-
-            // Read next token...
-            token = nextConfigToken();
-            continue;
         }
         else if(strcmp("rescanvif", token)==0) {
-            // Got a rescanvif token...
             my_log(LOG_DEBUG, 0, "Config: Need detect new interface.");
             commonConfig.rescanVif = 1;
-
-            // Read next token...
-            token = nextConfigToken();
-            continue;
         }
         else if(strcmp("chroot", token)==0) {
-            // path is in next token
-            token = nextConfigToken();
-
+            token = needValue("chroot");
             if (snprintf(commonConfig.chroot, sizeof(commonConfig.chroot), "%s",
               token) >= (int)sizeof(commonConfig.chroot))
                 my_log(LOG_ERR, 0, "Config: chroot is truncated");
-
-            my_log(LOG_DEBUG, 0, "Config: chroot set to %s",
-              commonConfig.chroot);
-            token = nextConfigToken();
-            continue;
         }
         else if(strcmp("user", token)==0) {
-            // username is in next token
-            token = nextConfigToken();
-
+            token = needValue("user");
             if (snprintf(commonConfig.user, sizeof(commonConfig.user), "%s",
               token) >= (int)sizeof(commonConfig.user))
                 my_log(LOG_ERR, 0, "Config: user is truncated");
-
-            my_log(LOG_DEBUG, 0, "Config: user set to %s", commonConfig.user);
-            token = nextConfigToken();
-            continue;
         } else {
-            // Unparsable token... Exit...
             closeConfigFile();
             my_log(LOG_WARNING, 0, "Unknown token '%s' in configfile", token);
             return 0;
         }
-        // Get token that was not recognized by phyint parser.
-        token = getCurrentConfigToken();
+        token = nextConfigToken();
     }
 
     // Close the configfile...
     closeConfigFile();
+
+    // Derived defaults (RFC 2236 section 8)
+    if (!startupIntervalSet)
+        commonConfig.startupQueryInterval = commonConfig.queryInterval / 4;
+    if (!startupCountSet)
+        commonConfig.startupQueryCount = commonConfig.robustnessValue;
+    if (!lmqCountSet)
+        commonConfig.lastMemberQueryCount = commonConfig.robustnessValue;
+
+    if (commonConfig.queryResponseInterval >= commonConfig.queryInterval) {
+        my_log(LOG_ERR, 0, "Config: queryresponseinterval (%ums) must be smaller than queryinterval (%ums)",
+               commonConfig.queryResponseInterval, commonConfig.queryInterval);
+    }
+
+    my_log(LOG_INFO, 0, "Config: robustness %u, query %ums/%ums, last member %ux%ums, "
+           "fastleave %s, upstream leave delay %ums",
+           commonConfig.robustnessValue, commonConfig.queryInterval,
+           commonConfig.queryResponseInterval, commonConfig.lastMemberQueryCount,
+           commonConfig.lastMemberQueryInterval, fastLeaveName(commonConfig.fastLeave),
+           commonConfig.upstreamLeaveDelay);
 
     return 1;
 }
@@ -257,18 +428,20 @@ void configureVifs(void) {
             // Now try to find a matching config...
             for( confPtr = vifconf; confPtr; confPtr = confPtr->next) {
 
-                // I the VIF names match...
                 if(strcmp(Dp->Name, confPtr->name)==0) {
                     struct SubnetList *vifLast;
 
                     my_log(LOG_DEBUG, 0, "Found config for %s", Dp->Name);
 
-
-                    // Set the VIF state
                     Dp->state = confPtr->state;
-
                     Dp->threshold = confPtr->threshold;
                     Dp->ratelimit = confPtr->ratelimit;
+
+                    Dp->fastLeave = confPtr->fastLeave;
+                    Dp->robustness = confPtr->robustness;
+                    Dp->lastMemberQueryInterval = confPtr->lastMemberQueryInterval;
+                    Dp->lastMemberQueryCount = confPtr->lastMemberQueryCount;
+                    Dp->groupTimeout = confPtr->groupTimeout;
 
                     // Go to last allowed net on VIF...
                     for(vifLast = Dp->allowednets; vifLast->next; vifLast = vifLast->next);
@@ -303,122 +476,87 @@ struct vifconfig *parsePhyintToken(void) {
     if(strlen(token) >= IF_NAMESIZE) return NULL;
     my_log(LOG_DEBUG, 0, "Config: IF: Config for interface %s.", token);
 
-    // Allocate memory for configuration...
-    tmpPtr = (struct vifconfig*)malloc(sizeof(struct vifconfig));
+    tmpPtr = (struct vifconfig*)calloc(1, sizeof(struct vifconfig));
     if(tmpPtr == NULL) {
         my_log(LOG_ERR, 0, "Out of memory.");
     }
 
     // Set default values...
-    tmpPtr->next = NULL;    // Important to avoid seg fault...
-    tmpPtr->ratelimit = 0;
     tmpPtr->threshold = 1;
     tmpPtr->state = commonConfig.defaultInterfaceState;
-    tmpPtr->allowednets = NULL;
-    tmpPtr->allowedgroups = NULL;
+    tmpPtr->fastLeave = FASTLEAVE_INHERIT;
 
-    // Make a copy of the token to store the IF name
     tmpPtr->name = strdup( token );
     if(tmpPtr->name == NULL) {
         my_log(LOG_ERR, 0, "Out of memory.");
     }
 
-    // Set the altnet pointer to the allowednets pointer.
     anetPtr = &tmpPtr->allowednets;
     agrpPtr = &tmpPtr->allowedgroups;
 
     // Parse the rest of the config..
     token = nextConfigToken();
     while(token != NULL) {
-        if(strcmp("altnet", token)==0) {
-            // Altnet...
-            token = nextConfigToken();
-            my_log(LOG_DEBUG, 0, "Config: IF: Got altnet token %s.",token);
+        char key[MAX_TOKEN_LENGTH];
+        snprintf(key, sizeof(key), "%s", token);
 
+        if(strcmp("altnet", token)==0) {
+            token = needValue("altnet");
             *anetPtr = parseSubnetAddress(token);
             if(*anetPtr == NULL) {
                 parseError = 1;
                 my_log(LOG_WARNING, 0, "Unable to parse subnet address.");
                 break;
-            } else {
-                anetPtr = &(*anetPtr)->next;
             }
+            anetPtr = &(*anetPtr)->next;
         }
-        else if(strcmp("whitelist", token)==0) {
-            // Whitelist
-            token = nextConfigToken();
-            my_log(LOG_DEBUG, 0, "Config: IF: Got whitelist token %s.", token);
-
+        else if(strcmp("whitelist", token)==0 || strcmp("blacklist", token)==0) {
+            bool allow = strcmp("whitelist", token)==0;
+            token = needValue(allow ? "whitelist" : "blacklist");
             *agrpPtr = parseSubnetAddress(token);
             if(*agrpPtr == NULL) {
-                free(tmpPtr->name);
-                free(tmpPtr);
                 my_log(LOG_ERR, 0, "Unable to parse subnet address.");
-            } else {
-                (*agrpPtr)->allow = true;
-                agrpPtr = &(*agrpPtr)->next;
             }
-        }
-        else if(strcmp("blacklist", token)==0) {
-            // Blacklist
-            token = nextConfigToken();
-            my_log(LOG_DEBUG, 0, "Config: IF: Got blacklist token %s.", token);
-
-            *agrpPtr = parseSubnetAddress(token);
-            if(*agrpPtr == NULL) {
-                free(tmpPtr->name);
-                free(tmpPtr);
-                my_log(LOG_ERR, 0, "Unable to parse subnet address.");
-            } else {
-                (*agrpPtr)->allow = false;
-                agrpPtr = &(*agrpPtr)->next;
-            }
+            (*agrpPtr)->allow = allow;
+            agrpPtr = &(*agrpPtr)->next;
         }
         else if(strcmp("upstream", token)==0) {
-            // Upstream
-            my_log(LOG_DEBUG, 0, "Config: IF: Got upstream token.");
             tmpPtr->state = IF_STATE_UPSTREAM;
         }
         else if(strcmp("downstream", token)==0) {
-            // Downstream
-            my_log(LOG_DEBUG, 0, "Config: IF: Got downstream token.");
             tmpPtr->state = IF_STATE_DOWNSTREAM;
         }
         else if(strcmp("disabled", token)==0) {
-            // Disabled
-            my_log(LOG_DEBUG, 0, "Config: IF: Got disabled token.");
             tmpPtr->state = IF_STATE_DISABLED;
         }
         else if(strcmp("ratelimit", token)==0) {
-            // Ratelimit
-            token = nextConfigToken();
-            my_log(LOG_DEBUG, 0, "Config: IF: Got ratelimit token '%s'.", token);
-            tmpPtr->ratelimit = atoi( token );
-            if(tmpPtr->ratelimit < 0) {
-                my_log(LOG_WARNING, 0, "Ratelimit must be 0 or more.");
-                parseError = 1;
-                break;
-            }
+            tmpPtr->ratelimit = (int)parseUInt(key, needValue(key), 0, 1000000);
         }
         else if(strcmp("threshold", token)==0) {
-            // Threshold
-            token = nextConfigToken();
-            my_log(LOG_DEBUG, 0, "Config: IF: Got threshold token '%s'.", token);
-            tmpPtr->threshold = atoi( token );
-            if(tmpPtr->threshold <= 0 || tmpPtr->threshold > 255) {
-                my_log(LOG_WARNING, 0, "Threshold must be between 1 and 255.");
-                parseError = 1;
-                break;
-            }
+            tmpPtr->threshold = (int)parseUInt(key, needValue(key), 1, 255);
+        }
+        else if(strcmp("fastleave", token)==0) {
+            tmpPtr->fastLeave = parseFastLeave(needValue(key));
+        }
+        else if(strcmp("robustness", token)==0) {
+            tmpPtr->robustness = parseUInt(key, needValue(key), 1, 7);
+        }
+        else if(strcmp("lastmemberinterval", token)==0) {
+            tmpPtr->lastMemberQueryInterval = parseTime(key, needValue(key), LMQI_MIN, LMQI_MAX);
+        }
+        else if(strcmp("lastmembercount", token)==0) {
+            tmpPtr->lastMemberQueryCount = parseUInt(key, needValue(key), 1, 10);
+        }
+        else if(strcmp("grouptimeout", token)==0) {
+            tmpPtr->groupTimeout = parseTime(key, needValue(key), GT_MIN, GT_MAX);
         }
         else {
-            // Unknown token. Break...
+            // Unknown token. Hand it back to the global parser.
             break;
         }
         token = nextConfigToken();
     }
 
-    // Clean up after a parseerror...
     if(parseError) {
         free(tmpPtr->name);
         free(tmpPtr);
@@ -446,7 +584,7 @@ struct SubnetList *parseSubnetAddress(char *addrstr) {
     if(tmpStr != NULL) {
         int bitcnt = atoi(tmpStr);
         if(bitcnt < 0 || bitcnt > 32) {
-            my_log(LOG_WARNING, 0, "The bits part of the address is invalid : %d.",tmpStr);
+            my_log(LOG_WARNING, 0, "The bits part of the address is invalid : %s.", tmpStr);
             return NULL;
         }
 
@@ -462,8 +600,11 @@ struct SubnetList *parseSubnetAddress(char *addrstr) {
     }
 
     tmpSubnet = (struct SubnetList*) malloc(sizeof(struct SubnetList));
+    if (tmpSubnet == NULL)
+        my_log(LOG_ERR, 0, "Out of memory.");
     tmpSubnet->subnet_addr = addr;
     tmpSubnet->subnet_mask = ntohl(mask);
+    tmpSubnet->allow = false;
     tmpSubnet->next = NULL;
 
     my_log(LOG_DEBUG, 0, "Config: IF: Altnet: Parsed altnet to %s.",

@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# PROVIDE: igmpproxy_plus
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# igmpproxy_plus_enable (bool):          Set to YES to enable. Default: NO
+# igmpproxy_plus_config (path):          Default: %%PREFIX%%/etc/igmpproxy-plus.conf
+# igmpproxy_plus_flags (str):            Extra flags, e.g. "-v"
+# igmpproxy_plus_igmp_version (2|3|""):  Sets net.inet.igmp.default_version
+
+. /etc/rc.subr
+
+name=igmpproxy_plus
+rcvar=igmpproxy_plus_enable
+
+load_rc_config $name
+
+: ${igmpproxy_plus_enable:="NO"}
+: ${igmpproxy_plus_config:="%%PREFIX%%/etc/igmpproxy-plus.conf"}
+: ${igmpproxy_plus_igmp_version:=""}
+
+command="%%PREFIX%%/sbin/igmpproxy-plus"
+procname="${command}"
+command_args="${igmpproxy_plus_config}"
+required_files="${igmpproxy_plus_config}"
+start_precmd="igmpproxy_plus_prestart"
+stop_postcmd="igmpproxy_plus_poststop"
+
+igmpproxy_plus_prestart()
+{
+	if ! ${command} -t ${igmpproxy_plus_config} > /dev/null; then
+		err 1 "invalid configuration ${igmpproxy_plus_config}"
+	fi
+	case "${igmpproxy_plus_igmp_version}" in
+	2|3)
+		/sbin/sysctl -q net.inet.igmp.default_version=${igmpproxy_plus_igmp_version} > /dev/null
+		;;
+	esac
+}
+
+igmpproxy_plus_poststop()
+{
+	/bin/rm -f /var/run/igmpproxy-plus.sock
+}
+
+run_rc_command "$1"

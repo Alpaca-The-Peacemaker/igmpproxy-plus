@@ -1,0 +1,24 @@
+dist/
+# autotools output
+Makefile
+Makefile.in
+!openwrt/**/Makefile
+!opnsense/**/Makefile
+aclocal.m4
+autom4te.cache/
+compile
+config.h
+config.h.in
+config.log
+config.status
+configure
+depcomp
+install-sh
+missing
+stamp-h1
+*.o
+.deps/
+src/os.h
+src/igmpproxy
+doc/igmpproxy.8
+doc/igmpproxy.conf.5

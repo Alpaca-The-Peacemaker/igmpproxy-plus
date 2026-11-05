@@ -1,0 +1,10 @@
+IGMP Proxy Plus is an igmpproxy fork with full control over how fast
+multicast traffic stops after a receiver leaves:
+
+- Fast leave per downstream interface: off (RFC 2236), on (immediate)
+  or auto (immediate when the last tracked host leaves)
+- Last member query interval (ms) and count
+- Querier timers: robustness, query interval, response interval,
+  startup query interval/count, per interface group membership timeout
+- Upstream leave delay for instant channel zapping
+- Live group table with per host timers
