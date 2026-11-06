@@ -62,6 +62,7 @@ igmp_header() {
 	emit_opt "$s" last_member_count lastmembercount
 	emit_opt "$s" upstream_leave_delay upstreamleavedelay ms
 	emit_opt "$s" host_limit hostlimit
+	emit_opt "$s" query_version queryversion
 }
 
 # --- interfaces ------------------------------------------------------------
@@ -103,6 +104,7 @@ igmp_add_phyint() {
 		emit_opt "$s" last_member_interval "	lastmemberinterval" ms
 		emit_opt "$s" last_member_count "	lastmembercount"
 		emit_opt "$s" group_timeout "	grouptimeout" s
+		emit_opt "$s" query_version "	queryversion"
 	fi
 
 	emit_list "$s" altnet altnet

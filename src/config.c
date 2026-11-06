@@ -54,6 +54,7 @@ struct vifconfig {
     unsigned int        lastMemberQueryInterval;
     unsigned int        lastMemberQueryCount;
     unsigned int        groupTimeout;
+    unsigned int        queryVersion;
 
     // Keep allowed nets for VIF.
     struct SubnetList*  allowednets;
@@ -109,6 +110,7 @@ static void initCommonConfig(void) {
     commonConfig.fastLeave = FASTLEAVE_OFF;
     commonConfig.upstreamLeaveDelay = 0;
     commonConfig.hostLimit = DEFAULT_HOST_LIMIT;
+    commonConfig.queryVersion = 3;
     snprintf(commonConfig.controlSocket, sizeof(commonConfig.controlSocket),
              "%s", "/var/run/igmpproxy.sock");
 
@@ -135,6 +137,13 @@ void ifTuningDefaults(struct IfDesc *Dp) {
     Dp->lastMemberQueryInterval = 0;
     Dp->lastMemberQueryCount = 0;
     Dp->groupTimeout = 0;
+    Dp->queryVersion = 0;
+}
+
+unsigned int ifQueryVersion(const struct IfDesc *Dp) {
+    if (Dp && Dp->queryVersion)
+        return Dp->queryVersion;
+    return commonConfig.queryVersion;
 }
 
 int ifFastLeave(const struct IfDesc *Dp) {
@@ -344,6 +353,9 @@ int loadConfig(char *configFile) {
         else if(strcmp("upstreamleavedelay", token)==0) {
             commonConfig.upstreamLeaveDelay = parseTime(key, needValue(key), 0, ULD_MAX);
         }
+        else if(strcmp("queryversion", token)==0) {
+            commonConfig.queryVersion = parseUInt(key, needValue(key), 2, 3);
+        }
         else if(strcmp("hostlimit", token)==0) {
             commonConfig.hostLimit = parseUInt(key, needValue(key), 0, 65535);
         }
@@ -399,11 +411,11 @@ int loadConfig(char *configFile) {
     }
 
     my_log(LOG_INFO, 0, "Config: robustness %u, query %ums/%ums, last member %ux%ums, "
-           "fastleave %s, upstream leave delay %ums",
+           "fastleave %s, upstream leave delay %ums, IGMPv%u queries",
            commonConfig.robustnessValue, commonConfig.queryInterval,
            commonConfig.queryResponseInterval, commonConfig.lastMemberQueryCount,
            commonConfig.lastMemberQueryInterval, fastLeaveName(commonConfig.fastLeave),
-           commonConfig.upstreamLeaveDelay);
+           commonConfig.upstreamLeaveDelay, commonConfig.queryVersion);
 
     return 1;
 }
@@ -442,6 +454,7 @@ void configureVifs(void) {
                     Dp->lastMemberQueryInterval = confPtr->lastMemberQueryInterval;
                     Dp->lastMemberQueryCount = confPtr->lastMemberQueryCount;
                     Dp->groupTimeout = confPtr->groupTimeout;
+                    Dp->queryVersion = confPtr->queryVersion;
 
                     // Go to last allowed net on VIF...
                     for(vifLast = Dp->allowednets; vifLast->next; vifLast = vifLast->next);
@@ -546,6 +559,9 @@ struct vifconfig *parsePhyintToken(void) {
         }
         else if(strcmp("lastmembercount", token)==0) {
             tmpPtr->lastMemberQueryCount = parseUInt(key, needValue(key), 1, 10);
+        }
+        else if(strcmp("queryversion", token)==0) {
+            tmpPtr->queryVersion = parseUInt(key, needValue(key), 2, 3);
         }
         else if(strcmp("grouptimeout", token)==0) {
             tmpPtr->groupTimeout = parseTime(key, needValue(key), GT_MIN, GT_MAX);

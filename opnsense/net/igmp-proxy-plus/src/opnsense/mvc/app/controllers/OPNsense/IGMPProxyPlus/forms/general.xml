@@ -46,6 +46,12 @@
         <collapse>true</collapse>
     </field>
     <field>
+        <id>igmpproxyplus.general.query_version</id>
+        <label>Query version</label>
+        <type>dropdown</type>
+        <help>IGMPv3 queries keep hosts in IGMPv3, where every host reports and sends its leave, so host tracking and auto fast leave are exact. IGMPv2 hosts still work. Choose IGMPv2 only for old equipment that needs it.</help>
+    </field>
+    <field>
         <id>igmpproxyplus.general.robustness</id>
         <label>Robustness</label>
         <type>text</type>

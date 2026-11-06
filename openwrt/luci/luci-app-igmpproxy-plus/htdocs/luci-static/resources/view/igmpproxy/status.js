@@ -65,7 +65,8 @@ function renderStatus(st) {
 			i.name, i.address, i.state,
 			i.state == 'downstream' ? i.fastleave : '-',
 			i.state == 'downstream' ? '%d x %d ms'.format(i.last_member_query_count, i.last_member_query_interval_ms) : '-',
-			i.state == 'downstream' ? ms(i.group_membership_interval_ms) : '-'
+			i.state == 'downstream' ? ms(i.group_membership_interval_ms) : '-',
+			i.state == 'downstream' && i.query_version ? 'IGMPv' + i.query_version : '-'
 		];
 	});
 
@@ -80,6 +81,7 @@ function renderStatus(st) {
 				: _('stopped, querying');
 			return E('div', {}, [
 				E('strong', {}, m.interface), ' ', state, ' – ', _('expires %s').format(ms(m.expires_in_ms)),
+				m.compat == 'v2' ? ' – ' + _('IGMPv2 host present') : '',
 				hosts ? E('div', { 'style': 'opacity:.75' }, hosts) : ''
 			]);
 		});
@@ -99,7 +101,7 @@ function renderStatus(st) {
 	return E('div', {}, [
 		E('h3', {}, _('Settings in use')), summary,
 		E('h3', {}, _('Interfaces')),
-		table([_('Interface'), _('Address'), _('Role'), _('Fast leave'), _('Last member queries'), _('Membership timeout')],
+		table([_('Interface'), _('Address'), _('Role'), _('Fast leave'), _('Last member queries'), _('Membership timeout'), _('Queries')],
 			ifRows, _('No interfaces')),
 		E('h3', {}, _('Multicast groups')),
 		table([_('Group'), _('Sources'), _('Upstream'), _('Downstream members'), _('Reports / leaves'), _('Age')],

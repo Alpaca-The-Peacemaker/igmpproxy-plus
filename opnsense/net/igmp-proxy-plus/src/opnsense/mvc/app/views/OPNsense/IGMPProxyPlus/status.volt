@@ -57,7 +57,8 @@
                         hosts += (hosts ? ', ' : '') + '{{ lang._('more, untracked') }}';
                     }
                     members += '<div><b>' + esc(m.interface) + '</b> ' + state + ' &ndash; {{ lang._('expires') }} ' +
-                        ms(m.expires_in_ms) + (hosts ? '<br/><small>' + hosts + '</small>' : '') + '</div>';
+                        ms(m.expires_in_ms) + (m.compat === 'v2' ? ' &ndash; {{ lang._('IGMPv2 host present') }}' : '') +
+                        (hosts ? '<br/><small>' + hosts + '</small>' : '') + '</div>';
                 });
                 let up = g.upstream === 'joined'
                     ? (g.leave_in_ms >= 0 ? '{{ lang._('leaving in') }} ' + ms(g.leave_in_ms) : '{{ lang._('joined') }}')

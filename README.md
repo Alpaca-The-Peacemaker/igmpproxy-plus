@@ -95,10 +95,11 @@ receivers on one LAN segment. The time is how long multicast keeps arriving afte
 | plus, `fastleave on` | **0 s** | ~1 s gap until it answers the group query |
 | plus, `fastleave auto` | **0 s** | no gap (both hosts tracked) |
 
-Note: like igmpproxy, this version sends IGMPv2 queries, so hosts run in IGMPv2 mode. In v2, a host that hears
-another host's report for the same group stays quiet and later sends no leave. On a shared
-segment without IGMP snooping, `auto` may therefore not know about every host. Use `off` with a
-short interval there, or `on` if a short dip for other viewers is acceptable.
+Since 1.1.0 the proxy sends **IGMPv3 queries** (igmpproxy sends IGMPv2). Hosts then stay in
+IGMPv3, where every host reports and every host sends its leave, so host tracking and `auto` are
+exact even without IGMP snooping. With `queryversion 2`, hosts fall back to IGMPv2, where a host
+that hears another host's report stays quiet and may send no leave; `auto` then needs a snooping
+switch to be exact.
 
 ## What changed compared to igmpproxy 0.4
 
@@ -110,6 +111,7 @@ short interval there, or `on` if a short dip for other viewers is acceptable.
 | A leave queries **every** downstream interface and ages the whole group. | Leaves are handled per interface. Other interfaces are not affected. |
 | Host tracking uses a lossy hash (`hashtablesize`), so it can't tell when the last host is gone. | Exact per-host list per group and interface, each host with its own timer. |
 | Robustness, query interval and response interval are fixed. | All configurable, with per-interface overrides. |
+| IGMPv2 queries only, so hosts suppress each other's reports. | IGMPv3 queries by default (`queryversion`), with IGMPv1/v2 host compatibility per group (RFC 3376). |
 | No status output. | Live JSON group table: `igmpproxy -S`, and the status pages in LuCI and OPNsense. |
 | — | `upstreamleavedelay`: stays joined upstream for a while, so switching back to a channel is instant. |
 | — | Upstream IGMP version can be forced (v2/v3) from the UI. |
@@ -123,9 +125,10 @@ short interval there, or `on` if a short dip for other viewers is acceptable.
   sent, so other receivers on the same segment re-report and get the stream back within
   milliseconds. Best when each port has one receiver, such as IPTV set-top boxes.
 - **auto**: stops at once when the leaving host was the last host the proxy saw on that
-  interface. Otherwise it behaves like `off`. Hosts must not suppress each other's reports, which
-  is the case behind a switch with IGMP snooping. If more than `hostlimit` hosts join, the proxy
-  falls back to `off` for that group and interface.
+  interface. Otherwise it behaves like `off`. With IGMPv3 queries (the default) every host is
+  seen. If an IGMPv1/v2-only device reports, that group falls back to `off` on that interface
+  until the device goes quiet, because v2 devices can hide each other. If more than `hostlimit`
+  hosts join, the proxy also falls back to `off` for that group and interface.
 
 ## Layout
 
@@ -159,6 +162,7 @@ override the global value for that interface.
 | `grouptimeout` (phyint) | `group_timeout` (s) | Group membership timeout (s) | robustness×QI+QRI |
 | `upstreamleavedelay` | `upstream_leave_delay` (ms) | Upstream leave delay (ms) | 0 |
 | `hostlimit` | `host_limit` | Tracked hosts limit | 256 |
+| `queryversion 2\|3` (global + phyint) | `query_version` | Query version | 3 |
 | `controlsocket` | (fixed `/var/run/igmpproxy.sock`) | (fixed `/var/run/igmpproxy-plus.sock`) | /var/run/igmpproxy.sock |
 | — | `upstream_igmp_version` (sets `force_igmp_version` on the upstream device) | System IGMP version (`net.inet.igmp.default_version`) | auto |
 | `blacklist 239.255.255.250/32` added to each downstream | `proxy_ssdp` (0 = keep SSDP local) | Proxy SSDP | SSDP not proxied |
@@ -223,6 +227,5 @@ plugin.
 
 ## Roadmap
 
-- IGMPv3 queries (so hosts stay in IGMPv3, no report suppression), with IGMPv2 fallback
 - Build and test the OPNsense plugin and FreeBSD port
 - Source-specific multicast (RFC 4605 source filtering), only if someone needs it

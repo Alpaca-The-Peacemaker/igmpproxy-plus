@@ -200,7 +200,8 @@ void acceptIgmp(int recvlen) {
     case IGMP_V1_MEMBERSHIP_REPORT:
     case IGMP_V2_MEMBERSHIP_REPORT:
         group = igmp->igmp_group.s_addr;
-        acceptGroupReport(src, group);
+        acceptGroupReport(src, group,
+            igmp->igmp_type == IGMP_V1_MEMBERSHIP_REPORT ? 1 : 2);
         return;
 
     case IGMP_V3_MEMBERSHIP_REPORT:
@@ -222,7 +223,7 @@ void acceptIgmp(int recvlen) {
             case IGMPV3_MODE_IS_EXCLUDE:
             case IGMPV3_CHANGE_TO_EXCLUDE:
             case IGMPV3_ALLOW_NEW_SOURCES:
-                acceptGroupReport(src, group);
+                acceptGroupReport(src, group, 3);
                 break;
             case IGMPV3_BLOCK_OLD_SOURCES:
                 break;
@@ -288,7 +289,7 @@ static void buildIgmp(uint32_t src, uint32_t dst, int type, int code, uint32_t g
     igmp->igmp_group.s_addr = group;
     igmp->igmp_cksum        = 0;
     igmp->igmp_cksum        = inetChksum((unsigned short *)igmp,
-                                         IP_HEADER_RAOPT_LEN + datalen);
+                                         IGMP_MINLEN + datalen);
 
 }
 

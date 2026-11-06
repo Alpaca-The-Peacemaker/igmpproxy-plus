@@ -78,6 +78,12 @@ return view.extend({
 		o.value('2', 'IGMPv2');
 		o.value('3', 'IGMPv3');
 
+		o = s.taboption('querier', form.ListValue, 'query_version', _('Query version'),
+			_('IGMPv3 queries keep hosts in IGMPv3, where every host reports and sends its leave, so host tracking and auto fast leave are exact. IGMPv2 hosts still work. Choose IGMPv2 only for old equipment that needs it.'));
+		o.value('3', _('IGMPv3'));
+		o.value('2', _('IGMPv2'));
+		o.default = '3';
+
 		o = s.taboption('querier', form.Value, 'robustness', _('Robustness'),
 			_('Tolerance for lost packets. Membership timeout = robustness x query interval + response interval.'));
 		o.datatype = 'range(1,7)';
@@ -181,6 +187,13 @@ return view.extend({
 		o = s.taboption('leave', form.Value, 'robustness', _('Robustness'));
 		o.datatype = 'range(1,7)';
 		o.placeholder = _('general');
+		o.depends('direction', 'downstream');
+		o.modalonly = true;
+
+		o = s.taboption('leave', form.ListValue, 'query_version', _('Query version'));
+		o.value('', _('Use general setting'));
+		o.value('3', _('IGMPv3'));
+		o.value('2', _('IGMPv2'));
 		o.depends('direction', 'downstream');
 		o.modalonly = true;
 

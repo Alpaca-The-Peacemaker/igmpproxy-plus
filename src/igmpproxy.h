@@ -170,6 +170,7 @@ struct IfDesc {
     unsigned int        lastMemberQueryInterval; /* ms, 0 = use global */
     unsigned int        lastMemberQueryCount;    /* 0 = use global */
     unsigned int        groupTimeout;            /* ms, 0 = computed GMI */
+    unsigned int        queryVersion;            /* 2 or 3, 0 = use global */
     unsigned char       threshold;   /* ttl limit */
     unsigned int        ratelimit;
     unsigned int        index;
@@ -192,6 +193,8 @@ struct Config {
     unsigned int        upstreamLeaveDelay;
     // Max tracked hosts per group per interface
     unsigned int        hostLimit;
+    // IGMP version of the queries sent on downstream interfaces (2 or 3)
+    unsigned int        queryVersion;
     // Path of the status socket, empty = disabled
     char                controlSocket[108];
     //~ aimwang added
@@ -247,6 +250,7 @@ int ifFastLeave(const struct IfDesc *Dp);
 unsigned int ifLastMemberQueryInterval(const struct IfDesc *Dp);
 unsigned int ifLastMemberQueryCount(const struct IfDesc *Dp);
 unsigned int ifGroupMembershipInterval(const struct IfDesc *Dp);
+unsigned int ifQueryVersion(const struct IfDesc *Dp);
 const char *fastLeaveName(int mode);
 
 /* igmp.c
@@ -280,7 +284,7 @@ void k_leave(struct IfDesc *ifd, uint32_t grp);
  */
 void initRouteTable(void);
 void clearAllRoutes(void);
-int insertRoute(uint32_t group, int ifx, uint32_t src);
+int insertRoute(uint32_t group, int ifx, uint32_t src, int version);
 int activateRoute(uint32_t group, uint32_t originAddr, int upstrVif);
 void routeLeave(uint32_t group, int ifx, uint32_t src);
 msec_t routeTableTick(msec_t now);
@@ -288,7 +292,7 @@ void routeTableDumpJson(FILE *f, msec_t now);
 
 /* request.c
  */
-void acceptGroupReport(uint32_t src, uint32_t group);
+void acceptGroupReport(uint32_t src, uint32_t group, int version);
 void acceptLeaveMessage(uint32_t src, uint32_t group);
 void sendGeneralMembershipQuery(void);
 void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group);

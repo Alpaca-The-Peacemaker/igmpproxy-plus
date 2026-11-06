@@ -30,6 +30,21 @@ jobs:
           assert a["received_before_leave"], "receiver never got traffic"
           assert a["stop_latency_s"] < 0.5, "traffic did not stop after leave"
           EOF
+      - name: Namespace test (IGMPv3, fast leave auto)
+        run: |
+          sudo python3 tools/nstest.py "$PWD/src/igmpproxy" plus-auto "fastleave auto" > v3.json
+          python3 - <<'EOF'
+          import json
+          r = json.load(open("v3.json"))
+          print(r["C_simultaneous_joins"], r["D_igmpv2_host"], r["queries_on_lan"])
+          assert r["queries_on_lan"]["v3"] > 0 and r["queries_on_lan"]["v2"] == 0, "queries are not IGMPv3"
+          c = r["C_simultaneous_joins"]
+          assert len(c["hosts_before_leave"]) == 2, "both receivers must be tracked"
+          assert c["leave_counted"], "the first receiver's leave must arrive"
+          assert c["rx2_max_gap_s"] < 0.2, "the other receiver must keep the stream"
+          d = r["D_igmpv2_host"]
+          assert d["received"] and d["compat_while_joined"] == "v2", "IGMPv2 host not handled"
+          EOF
 
   installer:
     name: Installer backup and rollback test

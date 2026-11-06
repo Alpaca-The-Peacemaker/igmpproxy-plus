@@ -152,6 +152,8 @@ def run(binary, label, extra):
             dumps[i] = out
         upd = os.path.join(tmp, "up.txt")
         procs.append(Proc("nsenter --net=/run/netns/rtr tcpdump -tt -n -l -i u0 igmp", upd))
+        downd = os.path.join(tmp, "down.txt")
+        procs.append(Proc("nsenter --net=/run/netns/rtr tcpdump -tt -n -l -v -i br0 igmp", downd))
         sock_supported = "plus" in label
         prox_log = os.path.join(tmp, "proxy.log")
         proxy = Proc(f"nsenter --net=/run/netns/rtr {binary} -d -v -v {conf}", prox_log)
@@ -182,7 +184,7 @@ def run(binary, label, extra):
         time.sleep(1)
 
         # --- scenario B: two receivers, one leaves, the other must keep the stream.
-        # The proxy sends IGMPv2 queries, so hosts run in IGMPv2 mode with report
+        # With IGMPv2 queries (queryversion 2) hosts run in IGMPv2 mode with report
         # suppression: a host that heard another host's report stays silent and
         # sends no leave. Stagger the joins so rx1 reports last and does leave.
         r2 = Proc(f"nsenter --net=/run/netns/rx2 python3 -u -c '{RECV}' nstest-recv", os.path.join(tmp, "r2b.log"))
@@ -205,6 +207,68 @@ def run(binary, label, extra):
         r1.kill(); r2.kill()
         os.killpg(r2.p.pid, signal.SIGUSR1)
         time.sleep(8)
+
+        if sock_supported:
+            def group_state():
+                st = json.loads(ns("rtr", f"{binary} -S /var/run/igmpproxy.sock"))
+                for g in st["groups"]:
+                    if g["group"] == GROUP:
+                        m = g["members"][0] if g["members"] else {}
+                        return {"leaves": g["leaves"], "forwarding": bool(m.get("forwarding")),
+                                "hosts": sorted(h["address"] for h in m.get("hosts", [])),
+                                "compat": m.get("compat")}
+                return {"leaves": 0, "forwarding": False, "hosts": [], "compat": None}
+
+            # --- scenario C: both receivers join at the same moment, rx1 leaves.
+            # With IGMPv3 queries there is no report suppression: both must be
+            # tracked and rx1's leave must arrive.
+            r1 = Proc(f"nsenter --net=/run/netns/rx1 python3 -u -c '{RECV}' nstest-recv", os.path.join(tmp, "r1c.log"))
+            r2 = Proc(f"nsenter --net=/run/netns/rx2 python3 -u -c '{RECV}' nstest-recv", os.path.join(tmp, "r2c.log"))
+            procs += [r1, r2]
+            time.sleep(4)
+            before = group_state()
+            t_leave = time.time()
+            os.killpg(r1.p.pid, signal.SIGUSR1)
+            time.sleep(4)
+            after = group_state()
+            ts = [t for t in pkt_times(dumps[2]) if t > t_leave - 2]
+            gaps = [b - a for a, b in zip(ts, ts[1:])]
+            results["C_simultaneous_joins"] = {
+                "hosts_before_leave": before["hosts"],
+                "leave_counted": after["leaves"] > before["leaves"],
+                "hosts_after_leave": after["hosts"],
+                "rx2_max_gap_s": round(max(gaps), 3) if gaps else None,
+            }
+            r1.kill(); r2.kill()
+            os.killpg(r2.p.pid, signal.SIGUSR1)
+            time.sleep(6)
+
+            # --- scenario D: an IGMPv2-only host on an IGMPv3 interface.
+            ns("rx2", "sysctl -qw net.ipv4.conf.r2.force_igmp_version=2")
+            r2 = Proc(f"nsenter --net=/run/netns/rx2 python3 -u -c '{RECV}' nstest-recv", os.path.join(tmp, "r2d.log"))
+            procs.append(r2)
+            time.sleep(4)
+            joined = group_state()
+            t_leave = time.time()
+            os.killpg(r2.p.pid, signal.SIGUSR1)
+            time.sleep(6)
+            ts = [t for t in pkt_times(dumps[2]) if t > t_leave - 4]
+            got = [t for t in ts if t <= t_leave]
+            after = [t for t in ts if t > t_leave]
+            results["D_igmpv2_host"] = {
+                "received": len(got) > 0,
+                "compat_while_joined": joined["compat"],
+                "stop_latency_s": round(after[-1] - t_leave, 3) if after else 0.0,
+            }
+            r2.kill()
+            ns("rx2", "sysctl -qw net.ipv4.conf.r2.force_igmp_version=0")
+
+        with open(downd) as f:
+            q = [l for l in f if "query" in l]
+        results["queries_on_lan"] = {
+            "v3": sum("query v3" in l for l in q),
+            "v2": sum("query v2" in l for l in q),
+        }
         with open(upd) as f:
             results["upstream_igmp"] = [l.strip() for l in f if "igmp" in l.lower()][-6:]
     finally:

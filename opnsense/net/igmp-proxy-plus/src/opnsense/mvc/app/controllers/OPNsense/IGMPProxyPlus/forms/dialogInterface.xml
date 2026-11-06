@@ -49,6 +49,11 @@
         <hint>general setting</hint>
     </field>
     <field>
+        <id>interface.query_version</id>
+        <label>Query version</label>
+        <type>dropdown</type>
+    </field>
+    <field>
         <id>interface.group_timeout</id>
         <label>Group membership timeout (s)</label>
         <type>text</type>

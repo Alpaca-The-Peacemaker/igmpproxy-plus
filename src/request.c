@@ -65,7 +65,7 @@ static bool groupAllowedOn(struct IfDesc *Dp, uint32_t group) {
 *   Handles incoming membership reports, and
 *   appends them to the routing table.
 */
-void acceptGroupReport(uint32_t src, uint32_t group) {
+void acceptGroupReport(uint32_t src, uint32_t group, int version) {
     struct IfDesc  *sourceVif;
 
     if(!IN_MULTICAST( ntohl(group) )) {
@@ -100,7 +100,7 @@ void acceptGroupReport(uint32_t src, uint32_t group) {
 
     my_log(LOG_DEBUG, 0, "Report for %s from %s on %s (VIF %d)",
         inetFmt(group,s1), inetFmt(src,s2), sourceVif->Name, sourceVif->index);
-    insertRoute(group, sourceVif->index, src);
+    insertRoute(group, sourceVif->index, src, version);
 }
 
 /**
@@ -147,6 +147,51 @@ static int maxRespCode(unsigned int ms) {
 }
 
 /**
+*   RFC 3376 4.1.1 / 4.1.7: values from 128 on use an 8 bit floating point
+*   format, value = (mant | 0x10) << (exp + 3). Rounds down.
+*/
+static int igmpv3Code(unsigned int v) {
+    unsigned int exp = 0;
+
+    if (v < 128)
+        return (int)v;
+    while (exp < 7 && (v >> (exp + 3)) > 0x1f)
+        exp++;
+    if ((v >> (exp + 3)) > 0x1f)
+        return 0xff;
+    return (int)(0x80 | (exp << 4) | ((v >> (exp + 3)) & 0x0f));
+}
+
+/**
+*   Sends a membership query on one interface: general (group 0) or group
+*   specific. IGMPv3 queries (RFC 3376 4.1) add S/QRV, QQIC and a zero
+*   source count after the IGMPv2 header; IGMPv2 hosts accept them as v2
+*   queries.
+*/
+static void sendQuery(struct IfDesc *Dp, uint32_t dst, uint32_t group, unsigned int maxRespMs) {
+    struct Config *conf = getCommonConfig();
+    unsigned int tenths = (maxRespMs + 99) / 100;
+
+    if (tenths < 1)
+        tenths = 1;
+
+    if (ifQueryVersion(Dp) == 3) {
+        unsigned char *data = (unsigned char *)send_buf + IP_HEADER_RAOPT_LEN + IGMP_MINLEN;
+        unsigned int qrv = Dp->robustness ? Dp->robustness : conf->robustnessValue;
+
+        data[0] = (unsigned char)(qrv > 7 ? 0 : qrv);          /* Resv | S=0 | QRV */
+        data[1] = (unsigned char)igmpv3Code(conf->queryInterval / 1000);  /* QQIC */
+        data[2] = 0;                                            /* number of sources */
+        data[3] = 0;
+        sendIgmp(Dp->InAdr.s_addr, dst, IGMP_MEMBERSHIP_QUERY,
+                 igmpv3Code(tenths), group, 4, Dp->ifIndex);
+    } else {
+        sendIgmp(Dp->InAdr.s_addr, dst, IGMP_MEMBERSHIP_QUERY,
+                 maxRespCode(maxRespMs), group, 0, Dp->ifIndex);
+    }
+}
+
+/**
 *   Sends one group specific query on one interface.
 */
 void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group) {
@@ -155,8 +200,7 @@ void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group) {
     if (!Dp->InAdr.s_addr || Dp->state != IF_STATE_DOWNSTREAM)
         return;
 
-    sendIgmp(Dp->InAdr.s_addr, group, IGMP_MEMBERSHIP_QUERY,
-             maxRespCode(lmqi), group, 0, Dp->ifIndex);
+    sendQuery(Dp, group, group, lmqi);
 
     my_log(LOG_DEBUG, 0, "Sent group specific query for %s on %s. Max resp: %ums",
            inetFmt(group, s1), Dp->Name, lmqi);
@@ -173,9 +217,7 @@ void sendGeneralMembershipQuery(void) {
     for ( Ix = 0; (Dp = getIfByIx(Ix)); Ix++ ) {
         if ( Dp->InAdr.s_addr && ! (Dp->Flags & IFF_LOOPBACK) &&
              Dp->state == IF_STATE_DOWNSTREAM) {
-            sendIgmp(Dp->InAdr.s_addr, allhosts_group,
-                     IGMP_MEMBERSHIP_QUERY,
-                     maxRespCode(conf->queryResponseInterval), 0, 0, Dp->ifIndex);
+            sendQuery(Dp, allhosts_group, 0, conf->queryResponseInterval);
 
             my_log(LOG_DEBUG, 0, "Sent membership query from %s ifIndex %d to %s. Max resp: %ums",
                 inetFmt(Dp->InAdr.s_addr,s1), Dp->ifIndex,

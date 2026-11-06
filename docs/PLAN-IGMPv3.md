@@ -1,5 +1,7 @@
 # Plan: IGMPv3 support (target release 1.1.0)
 
+> **Status:** Phase 1 is done in 1.1.0. Phase 2 and the other open items below remain.
+
 ## Why
 
 The proxy sends IGMPv2 queries, so every host falls back to IGMPv2. In v2 a host that

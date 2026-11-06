@@ -164,6 +164,20 @@ gone, 0 (default) to 5m. A join inside this window resumes forwarding at once
 without a new upstream join.
 .RE
 
+.B queryversion
+.IR 2 | 3
+(also phyint)
+.RS
+IGMP version of the queries sent on downstream interfaces, default 3. With IGMPv3
+queries hosts stay in IGMPv3 and never suppress each other's reports, so every host
+is tracked and every leave arrives. IGMPv1/v2 hosts keep working: when one reports,
+that group runs in IGMPv2 compatibility on that interface for the group membership
+interval (RFC 3376 7.3.2), and
+.B fastleave auto
+then behaves like
+.BR off .
+.RE
+
 .B hostlimit
 .I n
 .RS

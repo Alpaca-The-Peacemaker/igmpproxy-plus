@@ -67,6 +67,14 @@
                 <MaximumValue>10</MaximumValue>
                 <ValidationMessage>Startup query count must be between 0 and 10.</ValidationMessage>
             </startup_query_count>
+            <query_version type="OptionField">
+                <Default>3</Default>
+                <Required>Y</Required>
+                <OptionValues>
+                    <v3 value="3">IGMPv3</v3>
+                    <v2 value="2">IGMPv2</v2>
+                </OptionValues>
+            </query_version>
             <host_limit type="IntegerField">
                 <Default>256</Default>
                 <Required>Y</Required>
@@ -131,6 +139,13 @@
                     <MinimumValue>1</MinimumValue>
                     <MaximumValue>7</MaximumValue>
                 </robustness>
+                <query_version type="OptionField">
+                    <BlankDesc>Use general setting</BlankDesc>
+                    <OptionValues>
+                        <v3 value="3">IGMPv3</v3>
+                        <v2 value="2">IGMPv2</v2>
+                    </OptionValues>
+                </query_version>
                 <group_timeout type="IntegerField">
                     <MinimumValue>1</MinimumValue>
                     <MaximumValue>7200</MaximumValue>

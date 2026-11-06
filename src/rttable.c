@@ -73,6 +73,7 @@ struct VifState {
     unsigned int        lmqLeft;    // last member queries still to send
     unsigned int        nhosts;
     bool                overflow;   // more hosts than hostlimit: untracked
+    msec_t              olderHost;  // RFC 3376 7.3.2: v1/v2 host present until
     struct HostEntry   *hosts;
 };
 
@@ -351,7 +352,7 @@ static struct RouteTable *createRoute(uint32_t group) {
 *   A membership report for 'group' from host 'src' arrived on VIF 'ifx'.
 *   ifx < 0 only creates the entry.
 */
-int insertRoute(uint32_t group, int ifx, uint32_t src) {
+int insertRoute(uint32_t group, int ifx, uint32_t src, int version) {
     struct RouteTable *r;
     struct IfDesc *Dp;
     struct VifState *v;
@@ -383,6 +384,13 @@ int insertRoute(uint32_t group, int ifx, uint32_t src) {
 
         v->expires = exp;
         v->lmqLeft = 0;          // a report ends the last member query phase
+        if (version < 3) {
+            // Older Host Present Interval = robustness * QI + QRI
+            if (!v->olderHost || v->olderHost <= now)
+                my_log(LOG_INFO, 0, "Group %s: IGMPv%d host %s on %s, IGMPv2 compatibility",
+                       inetFmt(group, s1), version, inetFmt(src, s2), Dp ? Dp->Name : "?");
+            v->olderHost = now + ifGroupMembershipInterval(Dp);
+        }
         if (src)
             touchHost(v, src, exp);
         r->reports++;
@@ -423,8 +431,13 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     removeHost(v, src);
     r->leaves++;
 
+    // With IGMPv3 queries, an IGMPv1/v2 host on the interface means hosts
+    // may suppress each other's reports and the host list may be
+    // incomplete: auto then behaves like off. With "queryversion 2" the
+    // admin opted into v2 (e.g. behind IGMP snooping) and the list is trusted.
     drop = (mode == FASTLEAVE_ON) ||
-           (mode == FASTLEAVE_AUTO && v->hosts == NULL && !v->overflow);
+           (mode == FASTLEAVE_AUTO && v->hosts == NULL && !v->overflow &&
+            (ifQueryVersion(Dp) == 2 || !(v->olderHost > now)));
 
     if (drop) {
         my_log(LOG_INFO, 0, "Group %s: fast leave on %s (host %s, mode %s)",
@@ -600,6 +613,7 @@ msec_t routeTableTick(msec_t now) {
                        inetFmt(r->group, s1), Dp ? Dp->Name : "?");
                 v->expires = 0;
                 v->lmqLeft = 0;
+                v->olderHost = 0;
                 freeHosts(v);
             }
             if (v->expires)
@@ -707,11 +721,12 @@ void routeTableDumpJson(FILE *f, msec_t now) {
     fprintf(f, "\"config\":{\"robustness\":%u,\"query_interval_ms\":%u,"
                "\"query_response_interval_ms\":%u,\"startup_query_interval_ms\":%u,"
                "\"last_member_query_interval_ms\":%u,\"last_member_query_count\":%u,"
-               "\"fastleave\":\"%s\",\"upstream_leave_delay_ms\":%u,\"host_limit\":%u},",
+               "\"fastleave\":\"%s\",\"upstream_leave_delay_ms\":%u,\"host_limit\":%u,"
+               "\"query_version\":%u},",
             conf->robustnessValue, conf->queryInterval, conf->queryResponseInterval,
             conf->startupQueryInterval, conf->lastMemberQueryInterval,
             conf->lastMemberQueryCount, fastLeaveName(conf->fastLeave),
-            conf->upstreamLeaveDelay, conf->hostLimit);
+            conf->upstreamLeaveDelay, conf->hostLimit, conf->queryVersion);
 
     fputs("\"interfaces\":[", f);
     first = 1;
@@ -731,9 +746,11 @@ void routeTableDumpJson(FILE *f, msec_t now) {
                 inetFmt(Dp->InAdr.s_addr, buf), (int)Dp->index, st);
         if (Dp->state == IF_STATE_DOWNSTREAM)
             fprintf(f, ",\"fastleave\":\"%s\",\"last_member_query_interval_ms\":%u,"
-                       "\"last_member_query_count\":%u,\"group_membership_interval_ms\":%u",
+                       "\"last_member_query_count\":%u,\"group_membership_interval_ms\":%u,"
+                       "\"query_version\":%u",
                     fastLeaveName(ifFastLeave(Dp)), ifLastMemberQueryInterval(Dp),
-                    ifLastMemberQueryCount(Dp), ifGroupMembershipInterval(Dp));
+                    ifLastMemberQueryCount(Dp), ifGroupMembershipInterval(Dp),
+                    ifQueryVersion(Dp));
         fputc('}', f);
         first = 0;
     }
@@ -770,9 +787,10 @@ void routeTableDumpJson(FILE *f, msec_t now) {
             fprintf(f, "%s{\"interface\":", firstMember ? "" : ",");
             jsonStr(f, Dv ? Dv->Name : "?");
             fprintf(f, ",\"forwarding\":%s,\"expires_in_ms\":%lld,\"last_member_queries_left\":%u,"
-                       "\"hosts_untracked\":%s,\"hosts\":[",
+                       "\"hosts_untracked\":%s,\"compat\":\"%s\",\"hosts\":[",
                     v->expires ? "true" : "false", remainMs(v->expires, now), v->lmqLeft,
-                    v->overflow ? "true" : "false");
+                    v->overflow ? "true" : "false",
+                    (ifQueryVersion(Dv) == 2 || v->olderHost > now) ? "v2" : "v3");
             for (h = v->hosts; h; h = h->next) {
                 fprintf(f, "%s{\"address\":\"%s\",\"expires_in_ms\":%lld}",
                         firstHost ? "" : ",", inetFmt(h->addr, buf), remainMs(h->expires, now));
