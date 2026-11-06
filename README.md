@@ -95,6 +95,10 @@ receivers on one LAN segment. The time is how long multicast keeps arriving afte
 | plus, `fastleave on` | **0 s** | ~1 s gap until it answers the group query |
 | plus, `fastleave auto` | **0 s** | no gap (both hosts tracked) |
 
+**IGMPv1, v2 and v3 devices are all supported**, alone and mixed on the same LAN, with either
+query version. `tools/compat-test.py` checks all 36 combinations of device versions, query
+version and fast leave mode on every release.
+
 Since 1.1.0 the proxy sends **IGMPv3 queries** (igmpproxy sends IGMPv2). Hosts then stay in
 IGMPv3, where every host reports and every host sends its leave, so host tracking and `auto` are
 exact even without IGMP snooping. With `queryversion 2`, hosts fall back to IGMPv2, where a host

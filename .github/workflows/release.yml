@@ -46,6 +46,19 @@ jobs:
           assert d["received"] and d["compat_while_joined"] == "v2", "IGMPv2 host not handled"
           EOF
 
+  compat:
+    name: IGMPv1/v2/v3 compatibility matrix
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake tcpdump
+          ./autogen.sh && ./configure && make
+      - name: v1/v2/v3 hosts, query version 3 and 2, fast leave off/on/auto
+        run: sudo python3 tools/compat-test.py "$PWD/src/igmpproxy"
+
   installer:
     name: Installer backup and rollback test
     runs-on: ubuntu-24.04
@@ -88,7 +101,7 @@ jobs:
           path: out/*
 
   release:
-    needs: [daemon, installer, openwrt]
+    needs: [daemon, compat, installer, openwrt]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
