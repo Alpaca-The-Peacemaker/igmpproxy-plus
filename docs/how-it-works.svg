@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>How igmpproxy-plus fits in a home network</title>
+  <rect width="860" height="300" rx="14" fill="#ffffff"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2b6cb0"/>
+    </marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9aa5b1"/>
+    </marker>
+  </defs>
+
+  <!-- ISP -->
+  <rect x="24" y="96" width="170" height="96" rx="12" fill="#edf2f7" stroke="#a0aec0"/>
+  <text x="109" y="132" text-anchor="middle" font-size="17" font-weight="600" fill="#1a202c">Internet / ISP</text>
+  <text x="109" y="156" text-anchor="middle" font-size="13" fill="#4a5568">IPTV multicast</text>
+  <text x="109" y="174" text-anchor="middle" font-size="13" fill="#4a5568">channels</text>
+
+  <!-- Router -->
+  <rect x="300" y="64" width="250" height="160" rx="14" fill="#ebf4ff" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="425" y="96" text-anchor="middle" font-size="17" font-weight="600" fill="#1a202c">Router</text>
+  <text x="425" y="116" text-anchor="middle" font-size="13" fill="#4a5568">OpenWrt / OPNsense</text>
+  <rect x="322" y="132" width="206" height="72" rx="10" fill="#2b6cb0"/>
+  <text x="425" y="160" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">igmpproxy-plus</text>
+  <text x="425" y="182" text-anchor="middle" font-size="12" fill="#e2e8f0">forwards only what is watched,</text>
+  <text x="425" y="197" text-anchor="middle" font-size="12" fill="#e2e8f0">stops it the moment it is not</text>
+
+  <!-- arrows ISP <-> router -->
+  <line x1="196" y1="128" x2="296" y2="128" stroke="#2b6cb0" stroke-width="3" marker-end="url(#a)"/>
+  <text x="246" y="118" text-anchor="middle" font-size="12" fill="#2b6cb0">stream</text>
+  <line x1="296" y1="164" x2="198" y2="164" stroke="#9aa5b1" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#g)"/>
+  <text x="246" y="184" text-anchor="middle" font-size="12" fill="#718096">join / leave</text>
+
+  <!-- TVs -->
+  <rect x="660" y="40" width="176" height="62" rx="10" fill="#f0fff4" stroke="#38a169"/>
+  <text x="748" y="66" text-anchor="middle" font-size="15" font-weight="600" fill="#1a202c">TV 1</text>
+  <text x="748" y="86" text-anchor="middle" font-size="12" fill="#2f855a">watching channel A</text>
+
+  <rect x="660" y="118" width="176" height="62" rx="10" fill="#f0fff4" stroke="#38a169"/>
+  <text x="748" y="144" text-anchor="middle" font-size="15" font-weight="600" fill="#1a202c">TV 2</text>
+  <text x="748" y="164" text-anchor="middle" font-size="12" fill="#2f855a">just switched to channel B</text>
+
+  <rect x="660" y="196" width="176" height="62" rx="10" fill="#fff5f5" stroke="#e53e3e"/>
+  <text x="748" y="222" text-anchor="middle" font-size="15" font-weight="600" fill="#1a202c">Old channel C</text>
+  <text x="748" y="242" text-anchor="middle" font-size="12" fill="#c53030">stopped in 0 – 2 s, not 20 s</text>
+
+  <line x1="552" y1="110" x2="656" y2="72" stroke="#2b6cb0" stroke-width="3" marker-end="url(#a)"/>
+  <line x1="552" y1="144" x2="656" y2="148" stroke="#2b6cb0" stroke-width="3" marker-end="url(#a)"/>
+  <line x1="552" y1="178" x2="656" y2="226" stroke="#e53e3e" stroke-width="2" stroke-dasharray="3 6"/>
+  <text x="600" y="214" text-anchor="middle" font-size="18" fill="#e53e3e">✕</text>
+
+  <text x="430" y="284" text-anchor="middle" font-size="13" fill="#4a5568">Fewer streams on your Wi-Fi and uplink: only channels someone is actually watching.</text>
+</svg>

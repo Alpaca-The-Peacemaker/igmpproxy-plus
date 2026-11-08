@@ -41,6 +41,14 @@
 #include "igmpproxy.h"
 
 /**
+*   224.0.0.0/24 is link-local (RFC 5771): never routed, so memberships
+*   there (mDNS, LLMNR, ...) must not be proxied upstream.
+*/
+static bool linkLocalGroup(uint32_t group) {
+    return (ntohl(group) & 0xffffff00) == 0xe0000000;
+}
+
+/**
 *   Checks the downstream black/whitelist for a group on an interface.
 */
 static bool groupAllowedOn(struct IfDesc *Dp, uint32_t group) {
@@ -74,6 +82,11 @@ void acceptGroupReport(uint32_t src, uint32_t group, int version) {
         return;
     }
 
+    if (linkLocalGroup(group)) {
+        my_log(LOG_DEBUG, 0, "Ignoring link-local group %s", inetFmt(group, s1));
+        return;
+    }
+
     sourceVif = getIfByAddress( src );
     if(sourceVif == NULL) {
         my_log(LOG_WARNING, 0, "No interfaces found for source %s",
@@ -82,7 +95,7 @@ void acceptGroupReport(uint32_t src, uint32_t group, int version) {
     }
 
     if(sourceVif->InAdr.s_addr == src) {
-        my_log(LOG_NOTICE, 0, "The IGMP message was from myself. Ignoring.");
+        my_log(LOG_DEBUG, 0, "The IGMP message was from myself. Ignoring.");
         return;
     }
 
@@ -113,6 +126,11 @@ void acceptLeaveMessage(uint32_t src, uint32_t group) {
     if(!IN_MULTICAST( ntohl(group) )) {
         my_log(LOG_WARNING, 0, "The group address %s is not a valid Multicast group.",
             inetFmt(group, s1));
+        return;
+    }
+
+    if (linkLocalGroup(group)) {
+        my_log(LOG_DEBUG, 0, "Ignoring link-local group %s", inetFmt(group, s1));
         return;
     }
 

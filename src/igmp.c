@@ -144,14 +144,14 @@ void acceptIgmp(int recvlen) {
                         return;
                     }
                     else if(src == checkVIF->InAdr.s_addr) {
-                        my_log(LOG_NOTICE, 0, "Route activation request from %s for %s is from myself. Ignoring.",
+                        my_log(LOG_DEBUG, 0, "Route activation request from %s for %s is from myself. Ignoring.",
                             inetFmt(src, s1), inetFmt(dst, s2));
                         return;
                     }
                     else if(!isAdressValidForIf(checkVIF, src)) {
                         struct IfDesc *downVIF = getIfByAddress(src);
                         if (downVIF && downVIF->state & IF_STATE_DOWNSTREAM) {
-                            my_log(LOG_NOTICE, 0, "The source address %s for group %s is from downstream VIF[%d]. Ignoring.",
+                            my_log(LOG_DEBUG, 0, "The source address %s for group %s is from downstream VIF[%d]. Ignoring.",
                                 inetFmt(src, s1), inetFmt(dst, s2), i);
                         } else {
                             my_log(LOG_WARNING, 0, "The source address %s for group %s, is not in any valid net for upstream VIF[%d].",

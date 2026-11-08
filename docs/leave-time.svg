@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>How long a channel keeps streaming after the TV leaves it</title>
+  <rect width="860" height="300" rx="14" fill="#ffffff"/>
+  <text x="30" y="40" font-size="17" font-weight="600" fill="#1a202c">How long the old channel keeps streaming after a channel change</text>
+  <text x="30" y="62" font-size="13" fill="#4a5568">igmpproxy-plus values measured with tools/nstest.py; stock is its fixed 2 × 10 s (we measured more than 12 s)</text>
+
+  <!-- axis: x = 250 + s * 28  (0..20 s) -->
+  <g font-size="12" fill="#718096">
+    <line x1="250" y1="262" x2="810" y2="262" stroke="#cbd5e0"/>
+    <text x="250" y="280" text-anchor="middle">0</text>
+    <text x="390" y="280" text-anchor="middle">5</text>
+    <text x="530" y="280" text-anchor="middle">10</text>
+    <text x="670" y="280" text-anchor="middle">15</text>
+    <text x="810" y="280" text-anchor="middle">20 s</text>
+  </g>
+
+  <g font-size="14" fill="#1a202c">
+    <text x="236" y="98" text-anchor="end">stock igmpproxy</text>
+    <rect x="250" y="84" width="560" height="22" rx="4" fill="#e53e3e"/>
+    <text x="800" y="100" text-anchor="end" font-size="13" fill="#ffffff" font-weight="600">≈ 20 s</text>
+
+    <text x="236" y="138" text-anchor="end">plus · off (default)</text>
+    <rect x="250" y="124" width="56" height="22" rx="4" fill="#3182ce"/>
+    <text x="314" y="140" font-size="13" fill="#2b6cb0" font-weight="600">2.0 s</text>
+
+    <text x="236" y="178" text-anchor="end">plus · off, 300 ms queries</text>
+    <rect x="250" y="164" width="17" height="22" rx="4" fill="#3182ce"/>
+    <text x="275" y="180" font-size="13" fill="#2b6cb0" font-weight="600">0.6 s</text>
+
+    <text x="236" y="218" text-anchor="end" font-size="13">plus · on, or auto with IGMPv3 TVs</text>
+    <rect x="250" y="204" width="3" height="22" fill="#38a169"/>
+    <text x="261" y="220" font-size="13" fill="#2f855a" font-weight="600">0 s, instant</text>
+  </g>
+</svg>

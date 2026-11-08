@@ -1,69 +1,151 @@
 # igmpproxy-plus
 
 **An IGMP proxy that stops multicast the moment you stop watching.**
-igmpproxy-plus is an alternative to [igmpproxy](https://github.com/pali/igmpproxy) for
-OpenWrt and OPNsense. It gives you full control over fast leave and the timers that decide
-how quickly multicast traffic (IPTV and similar) stops after a receiver leaves, and it shows a
-live table of who is watching what.
+
+[![Latest release](https://img.shields.io/github/v/release/Alpaca-The-Peacemaker/igmpproxy-plus)](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases/latest)
+[![Build and release](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/actions/workflows/release.yml/badge.svg)](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/actions/workflows/release.yml)
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](COPYING)
+
+![How igmpproxy-plus fits in a home network](docs/how-it-works.svg)
+
+## What it does
+
+If you watch IPTV (TV from your internet provider) or use other multicast streams at home,
+your router runs an **IGMP proxy**. It asks the provider for a channel when a TV wants it, and
+should stop it when the TV changes channel.
+
+igmpproxy-plus is a drop-in replacement for the standard `igmpproxy` on **OpenWrt** (and,
+soon, **OPNsense**) that does this job much faster and gives you control over it:
+
+- **Channels stop within 0 to 2 seconds** after a channel change, instead of about 20 seconds.
+- **Fewer streams at once** on your Wi-Fi, switch and internet line while you zap.
+- **Works with every TV box**: IGMPv1, v2 and v3 devices, alone or mixed.
+- **Settings and a live status page** in the router's web interface: who is watching which
+  channel, and when each stream will stop.
+- **Your existing settings keep working.** It reads the same configuration file.
+
+![How long the old channel keeps streaming after a channel change](docs/leave-time.svg)
+
+## Why it was created
+
+igmpproxy has quietly done its job on countless home routers for about twenty years. It is
+small, dependable, and it is what OpenWrt and OPNsense ship as their IGMP proxy.
+
+The trouble shows up with IPTV. When you change channel, the TV leaves the old channel and
+joins the new one. With igmpproxy the old channel keeps streaming into your home for around 20
+seconds: its leave timer is fixed at 10 seconds in the source code, and there is no setting to
+change it. Zap through a few channels and several full TV streams run at once, which is
+exactly what makes Wi-Fi and slower lines stutter.
+
+Fixing that needed more than a small patch: a new timer engine, per-device tracking and new
+defaults. That changes how the proxy behaves, and existing igmpproxy users rely on how it
+behaves today. So rather than asking the igmpproxy project to rewrite its core, igmpproxy-plus
+is a separate package you can install *instead of* igmpproxy, and remove again at any time.
+igmpproxy itself stays exactly as it is.
+
+All credit for the foundation goes to the igmpproxy authors, see [Credits](#credits).
 
 ## Install on OpenWrt
 
-On the router (OpenWrt 24.10 or 25.12), over SSH:
+Works on **OpenWrt 24.10 and 25.12**. Prebuilt for x86_64, aarch64 (cortex-a53, cortex-a72,
+generic), arm (cortex-a7, cortex-a9, cortex-a15), mips_24kc and mipsel_24kc, which covers most
+current routers.
+
+### 1. Install (backs up automatically)
+
+Log in to your router over SSH and paste:
 
 ```sh
 wget -O /tmp/install.sh https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases/latest/download/install.sh && sh /tmp/install.sh
 ```
 
-The installer detects your OpenWrt version and CPU type, **backs up first**, replaces the stock
-`igmpproxy` package, installs the LuCI pages, and keeps your existing `/etc/config/igmpproxy`.
-If the new version fails to install or does not start, it **rolls back on its own**. You can
-read the script before running it: [install.sh](openwrt/install.sh).
+What it does, step by step:
 
-### Rollback and other commands
+1. Detects your OpenWrt version and CPU type and downloads the matching packages.
+2. **Saves a backup** to `/etc/igmpproxy-plus-backup/`: your `/etc/config/igmpproxy`, the
+   version you had (stock igmpproxy or an older igmpproxy-plus), and whether it was running.
+3. Replaces the stock `igmpproxy` package and adds the web interface pages.
+4. Keeps your settings, restarts the proxy and checks that it runs.
+5. **If anything fails, it rolls back on its own.**
 
-The installer stays on the router as `igmpproxy-plus-install`:
+Your TV may stutter for a second while the proxy restarts. You can read the script before
+running it: [openwrt/install.sh](openwrt/install.sh).
 
-| Command | What it does |
-|---|---|
-| `igmpproxy-plus-install rollback` | Undo the last install or upgrade: puts back the version you had before (stock igmpproxy or an earlier igmpproxy-plus) and your previous `/etc/config/igmpproxy` |
-| `igmpproxy-plus-install uninstall` | Go back to the stock igmpproxy package, keeping your config |
-| `igmpproxy-plus-install` | Upgrade to the latest release (backs up first) |
-| `igmpproxy-plus-install backup` | Save a backup now |
-| `igmpproxy-plus-install status` | Show installed versions, service state and the saved backup |
+> **Want a full router backup too?** Before installing, run
+> `sysupgrade -b /tmp/router-backup.tar.gz` and copy that file to your computer. It contains
+> your whole router configuration.
 
-Backups live in `/etc/igmpproxy-plus-backup/` (your config, the previous version, and whether the
-proxy was running). Each install or upgrade replaces the backup, so rollback goes one step back.
+### 2. Restore the previous version
 
-After installing:
+```sh
+igmpproxy-plus-install rollback
+```
 
-- Settings: **LuCI → Services → IGMP Proxy**
-- Live group table: `igmpproxy -S`
+This puts back exactly what you had before the last install or upgrade (stock igmpproxy or the
+previous igmpproxy-plus) and your previous `/etc/config/igmpproxy`.
 
-Prebuilt packages cover x86_64, aarch64 (cortex-a53, cortex-a72, generic), arm (cortex-a7,
-cortex-a9, cortex-a15), mips_24kc and mipsel_24kc. Other routers can build from source, see
-[Building](#building). OPNsense: see [OPNsense](#opnsense-freebsd-build-host-with-the-same-major-version-as-opnsense-eg-freebsd-14).
+To go back to stock igmpproxy permanently:
 
-## Why igmpproxy-plus exists
+```sh
+igmpproxy-plus-install uninstall
+```
 
-igmpproxy has quietly done its job on countless home routers for about twenty years. It is
-small, dependable, and it is what OpenWrt and OPNsense ship as their IGMP proxy.
+To restore the optional full router backup: `sysupgrade -r /tmp/router-backup.tar.gz`, then
+reboot.
 
-The trouble started with IPTV. When you change channel, the TV leaves the old multicast group
-and joins the new one. With igmpproxy 0.4 the old channel keeps flowing into the LAN for around
-20 seconds after the TV has left: the last member query interval is fixed at 10 seconds in the
-source, timers run in whole seconds, and the `quickleave` option only hurries the *upstream*
-leave, not the traffic going to your LAN. Zap through a few channels and several full streams
-are running at once, which is exactly what saturates Wi-Fi and slower links. There was no
-setting to change any of it.
+### 3. Use it
 
-Making it fast needed more than a tweak: a new timer engine in milliseconds, leaves handled per
-interface, exact tracking of which device watches what, and new defaults. That changes how the
-proxy behaves, and existing igmpproxy users rely on the way it behaves today. So instead of
-asking the igmpproxy project to take on a rewrite of its core, these changes live in a separate
-project that can be installed *instead of* igmpproxy when you want them, and left alone when you
-don't. igmpproxy itself stays exactly as it is.
+- **Settings:** LuCI → Services → IGMP Proxy → Settings
+- **Live status:** LuCI → Services → IGMP Proxy → Status, or `igmpproxy -S` over SSH
+- **Upgrade later:** `igmpproxy-plus-install` (backs up first, like the first install)
+- **Check versions and the saved backup:** `igmpproxy-plus-install status`
 
-### Credits
+## Install on OPNsense
+
+**Not available yet.** The OPNsense plugin (settings and status pages under Services → IGMP
+Proxy Plus) is written but not built or tested yet. Until then, please keep using the standard
+`os-igmp-proxy` plugin. This section will get the same install and restore commands once it is
+ready; follow the [releases](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases).
+
+## Recommended settings
+
+The defaults are safe for everyone. To make channel changes faster, pick the line that fits
+your home (Settings → Leave behaviour):
+
+| Your setup | Fast leave | Last member query interval | Result |
+|---|---|---|---|
+| Not sure, or several TVs that can watch the same channel | **off** | **300 ms** | Old channel stops in about 0.6 s, never interrupts another TV |
+| One TV box per switch port or per Wi-Fi client | **on** | (any) | Old channel stops instantly |
+| Newer TV boxes that speak IGMPv3 | **auto** | 1000 ms | Instant when the last viewer leaves, safe otherwise |
+
+The Status page shows **"IGMPv2 host present"** next to a channel when an older (IGMPv2) TV box
+is watching it. With IGMPv2 boxes, **auto** behaves like **off**, because those boxes can hide
+each other. That is why off with 300 ms is the best all-round choice for them.
+
+## Questions
+
+**Does it work with my TV box?**
+Yes. igmpproxy-plus supports IGMPv1, v2 and v3 devices, alone and mixed on the same network.
+Every release is tested against 36 combinations of device versions and settings
+(`tools/compat-test.py`), and it runs on a real router with IGMPv2 IPTV boxes.
+
+**Will my current settings be lost?**
+No. It reads the same `/etc/config/igmpproxy` as igmpproxy, and the installer backs it up
+before changing anything.
+
+**What if something goes wrong?**
+The installer rolls back automatically if the new version fails to install or start. You can
+also roll back yourself at any time with `igmpproxy-plus-install rollback`.
+
+**Does it send my home's traffic anywhere?**
+No. It only forwards the multicast channels your devices ask for. Local-only discovery traffic
+(UPnP/SSDP, mDNS, LLMNR) is never forwarded to your provider.
+
+**Is it an official OpenWrt package?**
+Not yet. It has been prepared for submission to the official OpenWrt package lists; until it is
+accepted, install it with the command above.
+
+## Credits
 
 igmpproxy-plus is built on the work of the people below. Their code, copyright notices and
 full commit history are kept in this repository, as the GPL asks and as they deserve.
@@ -81,7 +163,15 @@ igmpproxy-plus is an independent project. It is not affiliated with or endorsed 
 igmpproxy project or its authors. Please report problems with igmpproxy-plus
 [here](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/issues), not upstream.
 
-## How fast is it
+Licences: the daemon is GPL-2.0-or-later (`COPYING`, `Stanford.txt`), the LuCI app is
+Apache-2.0, and the OPNsense plugin is BSD-2-Clause.
+
+---
+
+## For advanced users
+
+<details>
+<summary><b>How fast is it: measurements</b></summary>
 
 Measured with `tools/nstest.py`: Linux network namespaces, a sender at 50 packets/s, and two
 receivers on one LAN segment. The time is how long multicast keeps arriving after a leave.
@@ -93,19 +183,18 @@ receivers on one LAN segment. The time is how long multicast keeps arriving afte
 | plus, `fastleave off` (2 × 1 s) | **2.0 s** | no gap |
 | plus, `fastleave off` (2 × 300 ms) | **0.6 s** | no gap |
 | plus, `fastleave on` | **0 s** | ~1 s gap until it answers the group query |
-| plus, `fastleave auto` | **0 s** | no gap (both hosts tracked) |
-
-**IGMPv1, v2 and v3 devices are all supported**, alone and mixed on the same LAN, with either
-query version. `tools/compat-test.py` checks all 36 combinations of device versions, query
-version and fast leave mode on every release.
+| plus, `fastleave auto` (IGMPv3 hosts) | **0 s** | no gap (both hosts tracked) |
 
 Since 1.1.0 the proxy sends **IGMPv3 queries** (igmpproxy sends IGMPv2). Hosts then stay in
-IGMPv3, where every host reports and every host sends its leave, so host tracking and `auto` are
-exact even without IGMP snooping. With `queryversion 2`, hosts fall back to IGMPv2, where a host
-that hears another host's report stays quiet and may send no leave; `auto` then needs a snooping
-switch to be exact.
+IGMPv3, where every host reports and every host sends its leave, so host tracking and `auto`
+are exact even without IGMP snooping. With `queryversion 2`, hosts fall back to IGMPv2, where a
+host that hears another host's report stays quiet and may send no leave; `auto` then needs a
+snooping switch to be exact.
 
-## What changed compared to igmpproxy 0.4
+</details>
+
+<details>
+<summary><b>What changed compared to igmpproxy 0.4</b></summary>
 
 | Stock igmpproxy 0.4 | igmpproxy-plus |
 |---|---|
@@ -116,39 +205,28 @@ switch to be exact.
 | Host tracking uses a lossy hash (`hashtablesize`), so it can't tell when the last host is gone. | Exact per-host list per group and interface, each host with its own timer. |
 | Robustness, query interval and response interval are fixed. | All configurable, with per-interface overrides. |
 | IGMPv2 queries only, so hosts suppress each other's reports. | IGMPv3 queries by default (`queryversion`), with IGMPv1/v2 host compatibility per group (RFC 3376). |
+| Link-local groups (224.0.0.x, e.g. mDNS) are joined upstream. | Link-local groups are never proxied; SSDP is kept local unless enabled. |
 | No status output. | Live JSON group table: `igmpproxy -S`, and the status pages in LuCI and OPNsense. |
 | — | `upstreamleavedelay`: stays joined upstream for a while, so switching back to a channel is instant. |
 | — | Upstream IGMP version can be forced (v2/v3) from the UI. |
 
-### Fast leave modes
+**Fast leave modes**
 
 - **off**: RFC 2236 behaviour. After a leave, the proxy sends `lastmembercount` group-specific
-  queries, `lastmemberinterval` apart. If nobody answers, it stops forwarding on that interface.
-  Worst-case stop time = count × interval (default 2 × 1 s).
+  queries, `lastmemberinterval` apart. If nobody answers, it stops forwarding on that
+  interface. Worst-case stop time = count × interval (default 2 × 1 s).
 - **on**: stops forwarding on that interface as soon as any host leaves. The queries are still
-  sent, so other receivers on the same segment re-report and get the stream back within
-  milliseconds. Best when each port has one receiver, such as IPTV set-top boxes.
+  sent, so other receivers on the same segment re-report and get the stream back within about
+  a second. Best when each port has one receiver.
 - **auto**: stops at once when the leaving host was the last host the proxy saw on that
-  interface. Otherwise it behaves like `off`. With IGMPv3 queries (the default) every host is
-  seen. If an IGMPv1/v2-only device reports, that group falls back to `off` on that interface
-  until the device goes quiet, because v2 devices can hide each other. If more than `hostlimit`
-  hosts join, the proxy also falls back to `off` for that group and interface.
+  interface, otherwise behaves like `off`. With IGMPv3 queries every host is seen. If an
+  IGMPv1/v2-only device reports, that group falls back to `off` on that interface until the
+  device goes quiet. Above `hostlimit` hosts it also falls back to `off`.
 
-## Layout
+</details>
 
-```
-configure.ac, src/, doc/        the daemon (igmpproxy fork, upstream history kept)
-openwrt/net/igmpproxy-plus/     OpenWrt package, alternative to "igmpproxy"
-openwrt/luci/luci-app-igmpproxy-plus/   LuCI settings + live status pages
-opnsense/net/igmp-proxy-plus/   OPNsense plugin (os-igmp-proxy-plus)
-opnsense/port/net/igmpproxy-plus/      FreeBSD port for the daemon
-tools/nstest.py                 network namespace test (needs root, Linux)
-```
-
-Licences: the daemon is GPL-2.0-or-later (see `COPYING`, `Stanford.txt`), the LuCI app is
-Apache-2.0, and the OPNsense plugin is BSD-2-Clause.
-
-## Configuration reference
+<details>
+<summary><b>Configuration reference</b></summary>
 
 Times in `igmpproxy.conf` accept `500ms`, `2s`, a plain number of seconds (`0.5`) or `2m`.
 **Global options must come before the first `phyint`.** Options inside a `phyint` block
@@ -160,39 +238,54 @@ override the global value for that interface.
 | `lastmemberinterval` (global + phyint) | `last_member_interval` (ms) | Last member query interval (ms) | 1s |
 | `lastmembercount` (global + phyint) | `last_member_count` | Last member query count | robustness |
 | `robustness` (global + phyint) | `robustness` | Robustness | 2 |
+| `queryversion 2\|3` (global + phyint) | `query_version` | Query version | 3 |
 | `queryinterval` | `query_interval` (s) | Query interval (s) | 125s |
 | `queryresponseinterval` | `query_response_interval` (s) | Query response interval (s) | 10s |
 | `startupqueryinterval` / `startupquerycount` | `startup_query_interval` / `startup_query_count` | Startup query interval / count | QI/4, robustness |
 | `grouptimeout` (phyint) | `group_timeout` (s) | Group membership timeout (s) | robustness×QI+QRI |
 | `upstreamleavedelay` | `upstream_leave_delay` (ms) | Upstream leave delay (ms) | 0 |
 | `hostlimit` | `host_limit` | Tracked hosts limit | 256 |
-| `queryversion 2\|3` (global + phyint) | `query_version` | Query version | 3 |
 | `controlsocket` | (fixed `/var/run/igmpproxy.sock`) | (fixed `/var/run/igmpproxy-plus.sock`) | /var/run/igmpproxy.sock |
 | — | `upstream_igmp_version` (sets `force_igmp_version` on the upstream device) | System IGMP version (`net.inet.igmp.default_version`) | auto |
 | `blacklist 239.255.255.250/32` added to each downstream | `proxy_ssdp` (0 = keep SSDP local) | Proxy SSDP | SSDP not proxied |
+| — | `verbose` (1 warnings, 2 info, 3 debug) | Log level | 1 |
 | `quickleave` (legacy) | `quickleave` (legacy) | — | = `fastleave auto` |
 | `hashtablesize` (legacy) | — | — | ignored |
 
-Your existing OpenWrt `/etc/config/igmpproxy` works unchanged. `quickleave '0'` means
-fast leave is off, but leaves are now detected in about 2 s instead of about 20 s, because
-the 1 s last member interval replaces the old 10 s.
+Your existing OpenWrt `/etc/config/igmpproxy` works unchanged. `quickleave '0'` means fast
+leave is off, but leaves are now detected in about 2 s instead of about 20 s, because the 1 s
+last member interval replaces the old 10 s.
 
-## Building
+</details>
 
-### Daemon on Linux
+<details>
+<summary><b>Building from source and testing</b></summary>
+
+**Daemon on Linux**
 
 ```sh
 ./autogen.sh && ./configure && make
 sudo ./src/igmpproxy -t igmpproxy.conf        # config check
 sudo ./src/igmpproxy -d -v -v igmpproxy.conf   # foreground with debug logging
 sudo ./src/igmpproxy -S                        # live group table (JSON)
-sudo python3 tools/nstest.py ./src/igmpproxy plus-auto "fastleave auto"   # namespace test
 ```
 
-### OpenWrt (SDK matching your router's release and target)
+**Tests** (Linux, root; they use network namespaces)
 
-The package downloads the tagged release `v$(PKG_VERSION)` from GitHub. Clone this repository
-and add its `openwrt/` folder as a feed in the SDK:
+```sh
+sudo python3 tools/nstest.py ./src/igmpproxy plus-auto "fastleave auto"   # leave times
+sudo python3 tools/compat-test.py ./src/igmpproxy                         # IGMPv1/v2/v3 matrix
+sudo python3 tools/linklocal-test.py ./src/igmpproxy                      # 224.0.0.x never proxied
+sudo sh tools/test-installer.sh                                           # installer, throwaway box only
+```
+
+**OpenWrt packages** with the official SDK for your release and target:
+
+```sh
+sh tools/openwrt-build.sh 25.12.6 mediatek/filogic out    # release, target/subtarget, output dir
+```
+
+Or add `openwrt/` as a feed in your own SDK:
 
 ```sh
 git clone https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus.git
@@ -201,21 +294,7 @@ echo "src-link igmpplus $PWD/igmpproxy-plus/openwrt" >> feeds.conf.default
 make package/igmpproxy-plus/compile package/luci-app-igmpproxy-plus/compile V=s
 ```
 
-Or let the script fetch the right SDK and build both packages from your checkout (this is what
-the release workflow runs for every target):
-
-```sh
-sh tools/openwrt-build.sh 25.12.6 mediatek/filogic out    # release, target/subtarget, output dir
-```
-
-To build from a local checkout inside your own SDK instead of a release, add
-`USE_SOURCE_DIR=/path/to/igmpproxy-plus` to the `make package/igmpproxy-plus/compile` line.
-
-On the router: remove `igmpproxy`, then install `igmpproxy-plus` and `luci-app-igmpproxy-plus`
-(apk on 25.12, opkg on 24.10). The service is still `/etc/init.d/igmpproxy` and your existing
-`/etc/config/igmpproxy` keeps working. Settings are under **Services → IGMP Proxy**.
-
-### OPNsense (FreeBSD build host with the same major version as OPNsense, e.g. FreeBSD 14)
+**OPNsense** (FreeBSD build host with the same major version as OPNsense; not tested yet):
 
 ```sh
 cp -r opnsense/port/net/igmpproxy-plus /usr/ports/net/
@@ -224,12 +303,22 @@ cd /usr/ports/net/igmpproxy-plus && make makesum && make package
 cp -r opnsense/net/igmp-proxy-plus net/ && cd net/igmp-proxy-plus && make package
 ```
 
-On OPNsense: uninstall `os-igmp-proxy`, run `pkg add` on both packages, and the plugin appears
-under **Services → IGMP Proxy Plus** (Settings and Status). You still need firewall rules that
-allow IGMP and the multicast UDP traffic, with "allow options" set, just like with the stock
-plugin.
+**Repository layout**
+
+```
+configure.ac, src/, doc/              the daemon (igmpproxy fork, upstream history kept)
+openwrt/net/igmpproxy-plus/           OpenWrt package
+openwrt/luci/luci-app-igmpproxy-plus/ LuCI settings + live status pages
+openwrt/install.sh                    one-line installer with backup and rollback
+opnsense/                             OPNsense plugin and FreeBSD port
+tools/                                build script and tests
+docs/                                 illustrations and plans
+```
+
+</details>
 
 ## Roadmap
 
-- Build and test the OPNsense plugin and FreeBSD port
+- OPNsense plugin and FreeBSD port: build, test, one-line install
+- Official OpenWrt and OPNsense package submission
 - Source-specific multicast (RFC 4605 source filtering), only if someone needs it
