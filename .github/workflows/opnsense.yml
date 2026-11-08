@@ -1,0 +1,34 @@
+name: OPNsense packages
+
+on:
+  push:
+    branches: ['opnsense-dev']
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  freebsd:
+    name: FreeBSD ${{ matrix.freebsd }} (OPNsense ${{ matrix.opnsense }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - freebsd: '15.1'
+            opnsense: '26.7'
+          - freebsd: '14.3'
+            opnsense: '25.7 / 26.1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build packages in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: ${{ matrix.freebsd }}
+          usesh: true
+          copyback: true
+          run: |
+            sh tools/opnsense-build.sh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opnsense-freebsd-${{ matrix.freebsd }}
+          path: out/*
