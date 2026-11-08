@@ -3,15 +3,26 @@
 		"description": "Grant access to igmpproxy-plus settings and status",
 		"read": {
 			"file": {
-				"/usr/sbin/igmpproxy -S": [ "exec" ]
+				"/usr/sbin/igmpproxy -S": [
+					"exec"
+				]
 			},
 			"ubus": {
-				"file": [ "exec" ]
+				"file": [
+					"exec"
+				],
+				"luci-rpc": [
+					"getDHCPLeases"
+				]
 			},
-			"uci": [ "igmpproxy" ]
+			"uci": [
+				"igmpproxy"
+			]
 		},
 		"write": {
-			"uci": [ "igmpproxy" ]
+			"uci": [
+				"igmpproxy"
+			]
 		}
 	}
 }
