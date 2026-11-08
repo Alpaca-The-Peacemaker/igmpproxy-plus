@@ -304,7 +304,7 @@ void routeTableDumpJson(FILE *f, msec_t now);
 void acceptGroupReport(uint32_t src, uint32_t group, int version);
 void acceptLeaveMessage(uint32_t src, uint32_t group);
 void sendGeneralMembershipQuery(void);
-void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group);
+void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group, int forceV2);
 
 /* control.c
  */

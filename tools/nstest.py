@@ -37,14 +37,14 @@ def ns(n, cmd, check=True):
 
 
 def teardown():
-    for n in ("src", "rtr", "rx1", "rx2"):
+    for n in ("src", "rtr", "rx1", "rx2", "rx3"):
         sh(f"ip netns del {n}", check=False)
     sh("pkill -f 'nstest-(sender|recv)'", check=False)
 
 
 def setup():
     teardown()
-    for n in ("src", "rtr", "rx1", "rx2"):
+    for n in ("src", "rtr", "rx1", "rx2", "rx3"):
         sh(f"ip netns add {n}")
         ns(n, "ip link set lo up")
     sh("ip link add s0 netns src type veth peer name u0 netns rtr")
@@ -56,7 +56,7 @@ def setup():
     ns("rtr", "ip link add br0 type bridge mcast_snooping 0")
     ns("rtr", "ip addr add 10.0.2.1/24 dev br0")
     ns("rtr", "ip link set br0 up")
-    for i in (1, 2):
+    for i in (1, 2, 3):
         sh(f"ip link add b{i} netns rtr type veth peer name r{i} netns rx{i}")
         ns("rtr", f"ip link set b{i} master br0")
         ns("rtr", f"ip link set b{i} up")

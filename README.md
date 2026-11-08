@@ -152,24 +152,32 @@ igmpproxy-plus-install uninstall
 
 ## Recommended settings
 
-The defaults are safe for everyone. To make channel changes faster, pick the line that fits
-your home (Settings → Leave behaviour):
+**A channel is never stopped while another known TV box is still watching it**, in every mode.
+With several boxes in the house on the same channel, one box changing channel or switching off
+does not interrupt the others. The modes only decide how fast a channel stops once the **last**
+box has left it (Settings → Leave behaviour):
 
-| Your setup | Fast leave | Last member query interval | Result |
-|---|---|---|---|
-| Not sure, or several TVs that can watch the same channel | **off** | **300 ms** | Old channel stops in about 0.6 s, never interrupts another TV |
-| One TV box per switch port or per Wi-Fi client | **on** | (any) | Old channel stops instantly |
-| Newer TV boxes that speak IGMPv3 | **auto** | 1000 ms | Instant when the last viewer leaves, safe otherwise |
+| Fast leave | When the last box leaves a channel | Good for |
+|---|---|---|
+| **off** (default) | Stops after the check (2 × 1 s by default) | Everyone; the most conservative |
+| **on** | Stops instantly | Homes that want the fastest channel changes |
+| **auto** | Instantly with IGMPv3 boxes, after the check with IGMPv2 boxes | Mixed or newer equipment |
 
-The Status page shows **"IGMPv2 host present"** next to a channel when an older (IGMPv2) TV box
-is watching it. With IGMPv2 boxes, **auto** behaves like **off**, because those boxes can hide
-each other. That is why off with 300 ms is the best all-round choice for them.
+Keep the **last member query interval at 1000 ms** unless you know your boxes answer quickly:
+slow IPTV boxes need that time to answer the router's "anyone still watching?" check. The
+Status page shows **"IGMPv2 host present"** next to channels watched by older (IGMPv2) boxes;
+for those, the router sends its checks in IGMPv2 format automatically.
 
 ## Questions
 
+**I have several TV boxes on the same channel. Is that a problem?**
+No. igmpproxy-plus tracks every box that asked for a channel and keeps the channel flowing as
+long as any of them is still watching, even if a box is slow to answer (or ignores) the router's
+checks. This is tested with up to three boxes on one channel, including a box that never answers.
+
 **Does it work with my TV box?**
 Yes. igmpproxy-plus supports IGMPv1, v2 and v3 devices, alone and mixed on the same network.
-Every release is tested against 36 combinations of device versions and settings
+Every release is tested against 48 combinations of device versions, settings and multi-box cases
 (`tools/compat-test.py`), and it runs on a real router with IGMPv2 IPTV boxes.
 
 **Will my current settings be lost?**
@@ -225,7 +233,7 @@ receivers on one LAN segment. The time is how long multicast keeps arriving afte
 | stock + `quickleave` | still flowing when the 12 s window ended | no gap |
 | plus, `fastleave off` (2 × 1 s) | **2.0 s** | no gap |
 | plus, `fastleave off` (2 × 300 ms) | **0.6 s** | no gap |
-| plus, `fastleave on` | **0 s** | ~1 s gap until it answers the group query |
+| plus, `fastleave on` | **0 s** | no gap (the other box is still tracked) |
 | plus, `fastleave auto` (IGMPv3 hosts) | **0 s** | no gap (both hosts tracked) |
 
 Since 1.1.0 the proxy sends **IGMPv3 queries** (igmpproxy sends IGMPv2). Hosts then stay in
@@ -255,12 +263,14 @@ snooping switch to be exact.
 
 **Fast leave modes**
 
-- **off**: RFC 2236 behaviour. After a leave, the proxy sends `lastmembercount` group-specific
-  queries, `lastmemberinterval` apart. If nobody answers, it stops forwarding on that
-  interface. Worst-case stop time = count × interval (default 2 × 1 s).
-- **on**: stops forwarding on that interface as soon as any host leaves. The queries are still
-  sent, so other receivers on the same segment re-report and get the stream back within about
-  a second. Best when each port has one receiver.
+- **off**: RFC 2236 behaviour. After the last tracked host leaves, the proxy sends
+  `lastmembercount` group-specific queries, `lastmemberinterval` apart. If nobody answers, it
+  stops forwarding on that interface. Worst-case stop time = count × interval (default 2 × 1 s).
+- In **every** mode, a leave from one host never stops the group while other hosts that reported
+  it on that interface have not left (explicit host tracking). IGMPv2 hosts that stay quiet
+  because another host answered (report suppression) stay tracked.
+- **on**: stops forwarding on that interface as soon as the last tracked host leaves. While other
+  hosts that reported the group have not left, it keeps flowing.
 - **auto**: stops at once when the leaving host was the last host the proxy saw on that
   interface, otherwise behaves like `off`. With IGMPv3 queries every host is seen. If an
   IGMPv1/v2-only device reports, that group falls back to `off` on that interface until the

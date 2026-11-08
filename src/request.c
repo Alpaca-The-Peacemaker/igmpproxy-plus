@@ -186,14 +186,14 @@ static int igmpv3Code(unsigned int v) {
 *   source count after the IGMPv2 header; IGMPv2 hosts accept them as v2
 *   queries.
 */
-static void sendQuery(struct IfDesc *Dp, uint32_t dst, uint32_t group, unsigned int maxRespMs) {
+static void sendQuery(struct IfDesc *Dp, uint32_t dst, uint32_t group, unsigned int maxRespMs, int forceV2) {
     struct Config *conf = getCommonConfig();
     unsigned int tenths = (maxRespMs + 99) / 100;
 
     if (tenths < 1)
         tenths = 1;
 
-    if (ifQueryVersion(Dp) == 3) {
+    if (ifQueryVersion(Dp) == 3 && !forceV2) {
         unsigned char *data = (unsigned char *)send_buf + IP_HEADER_RAOPT_LEN + IGMP_MINLEN;
         unsigned int qrv = Dp->robustness ? Dp->robustness : conf->robustnessValue;
 
@@ -212,13 +212,18 @@ static void sendQuery(struct IfDesc *Dp, uint32_t dst, uint32_t group, unsigned 
 /**
 *   Sends one group specific query on one interface.
 */
-void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group) {
+/**
+*   Group specific queries go out in IGMPv2 format when an IGMPv1/v2 host
+*   reported the group on this interface (forceV2): some IPTV set-top boxes
+*   do not answer IGMPv3 group specific queries.
+*/
+void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group, int forceV2) {
     unsigned int lmqi = ifLastMemberQueryInterval(Dp);
 
     if (!Dp->InAdr.s_addr || Dp->state != IF_STATE_DOWNSTREAM)
         return;
 
-    sendQuery(Dp, group, group, lmqi);
+    sendQuery(Dp, group, group, lmqi, forceV2);
 
     my_log(LOG_DEBUG, 0, "Sent group specific query for %s on %s. Max resp: %ums",
            inetFmt(group, s1), Dp->Name, lmqi);
@@ -235,7 +240,7 @@ void sendGeneralMembershipQuery(void) {
     for ( Ix = 0; (Dp = getIfByIx(Ix)); Ix++ ) {
         if ( Dp->InAdr.s_addr && ! (Dp->Flags & IFF_LOOPBACK) &&
              Dp->state == IF_STATE_DOWNSTREAM) {
-            sendQuery(Dp, allhosts_group, 0, conf->queryResponseInterval);
+            sendQuery(Dp, allhosts_group, 0, conf->queryResponseInterval, 0);
 
             my_log(LOG_DEBUG, 0, "Sent membership query from %s ifIndex %d to %s. Max resp: %ums",
                 inetFmt(Dp->InAdr.s_addr,s1), Dp->ifIndex,

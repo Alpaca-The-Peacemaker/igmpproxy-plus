@@ -74,6 +74,7 @@ struct VifState {
     unsigned int        nhosts;
     bool                overflow;   // more hosts than hostlimit: untracked
     msec_t              olderHost;  // RFC 3376 7.3.2: v1/v2 host present until
+    uint32_t            leftBy;     // host whose leave started the member check
     struct HostEntry   *hosts;
 };
 
@@ -384,6 +385,7 @@ int insertRoute(uint32_t group, int ifx, uint32_t src, int version) {
 
         v->expires = exp;
         v->lmqLeft = 0;          // a report ends the last member query phase
+        v->leftBy = 0;
         if (version < 3) {
             // Older Host Present Interval = robustness * QI + QRI
             if (!v->olderHost || v->olderHost <= now)
@@ -393,6 +395,15 @@ int insertRoute(uint32_t group, int ifx, uint32_t src, int version) {
         }
         if (src)
             touchHost(v, src, exp);
+        if (version < 3) {
+            // IGMPv1/v2 hosts that heard this report suppress their own, so
+            // their silence does not mean they left: keep every known host of
+            // this group alive. They leave the list by a leave message, or
+            // when nobody reported the group for the membership interval.
+            struct HostEntry *h;
+            for (h = v->hosts; h; h = h->next)
+                h->expires = exp;
+        }
         r->reports++;
     }
 
@@ -412,7 +423,7 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     msec_t now = now_ms();
     unsigned int lmqi, lmqc;
     int mode;
-    bool drop;
+    bool drop, others;
 
     if (ifx < 0 || ifx >= MAXVIFS || ifx >= 32)
         return;
@@ -431,32 +442,43 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     removeHost(v, src);
     r->leaves++;
 
+    // Other hosts that reported this group on this interface and have not
+    // left: the group must keep flowing for them, whatever the mode, even if
+    // they are slow to answer (or ignore) the group specific query. Their own
+    // host timers end it if they left silently.
+    others = (v->hosts != NULL);
+
     // With IGMPv3 queries, an IGMPv1/v2 host on the interface means hosts
     // may suppress each other's reports and the host list may be
     // incomplete: auto then behaves like off. With "queryversion 2" the
     // admin opted into v2 (e.g. behind IGMP snooping) and the list is trusted.
-    drop = (mode == FASTLEAVE_ON) ||
-           (mode == FASTLEAVE_AUTO && v->hosts == NULL && !v->overflow &&
-            (ifQueryVersion(Dp) == 2 || !(v->olderHost > now)));
+    drop = !others && !v->overflow &&
+           ((mode == FASTLEAVE_ON) ||
+            (mode == FASTLEAVE_AUTO &&
+             (ifQueryVersion(Dp) == 2 || !(v->olderHost > now))));
 
     if (drop) {
-        my_log(LOG_INFO, 0, "Group %s: fast leave on %s (host %s, mode %s)",
+        my_log(LOG_WARNING, 0, "Group %s: stopped on %s, fast leave (last host %s left, mode %s)",
                inetFmt(group, s1), Dp ? Dp->Name : "?", inetFmt(src, s2), fastLeaveName(mode));
         v->expires = 0;
         freeHosts(v);
+    } else if (others) {
+        my_log(LOG_INFO, 0, "Group %s: leave from %s on %s, still watched by %u other host(s), keeps flowing",
+               inetFmt(group, s1), inetFmt(src, s2), Dp ? Dp->Name : "?", v->nhosts);
     } else {
         msec_t lmqt = now + (msec_t)lmqi * lmqc;
         my_log(LOG_INFO, 0, "Group %s: leave from %s on %s, checking for other members (%ux%ums)",
                inetFmt(group, s1), inetFmt(src, s2), Dp ? Dp->Name : "?", lmqc, lmqi);
         if (v->expires > lmqt)
             v->expires = lmqt;
+        v->leftBy = src;
     }
 
     // Last member queries let remaining (possibly untracked) hosts answer.
     // In "on"/"auto" mode forwarding has already stopped and a report
     // simply resumes it.
     if (Dp && lmqc > 0) {
-        sendGroupSpecificQuery(Dp, group);
+        sendGroupSpecificQuery(Dp, group, v->olderHost > now);
         v->lmqLeft = lmqc - 1;
         v->lmqNext = now + lmqi;
     }
@@ -599,7 +621,7 @@ msec_t routeTableTick(msec_t now) {
             if (v->lmqLeft && v->lmqNext <= now) {
                 struct IfDesc *Dp = getIfByVifIndex(i);
                 if (Dp)
-                    sendGroupSpecificQuery(Dp, r->group);
+                    sendGroupSpecificQuery(Dp, r->group, v->olderHost > now);
                 v->lmqLeft--;
                 v->lmqNext = now + ifLastMemberQueryInterval(Dp);
             }
@@ -609,8 +631,13 @@ msec_t routeTableTick(msec_t now) {
             // membership timer
             if (v->expires && v->expires <= now) {
                 struct IfDesc *Dp = getIfByVifIndex(i);
-                my_log(LOG_INFO, 0, "Group %s: membership on %s expired",
-                       inetFmt(r->group, s1), Dp ? Dp->Name : "?");
+                if (v->leftBy)
+                    my_log(LOG_WARNING, 0, "Group %s: stopped on %s, no member answered after leave from %s",
+                           inetFmt(r->group, s1), Dp ? Dp->Name : "?", inetFmt(v->leftBy, s2));
+                else
+                    my_log(LOG_WARNING, 0, "Group %s: stopped on %s, no report for %us (membership timeout)",
+                           inetFmt(r->group, s1), Dp ? Dp->Name : "?", ifGroupMembershipInterval(Dp) / 1000);
+                v->leftBy = 0;
                 v->expires = 0;
                 v->lmqLeft = 0;
                 v->olderHost = 0;

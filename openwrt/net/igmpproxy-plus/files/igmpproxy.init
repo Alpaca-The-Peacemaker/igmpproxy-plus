@@ -225,6 +225,8 @@ start_service() {
 	[ -n "$logopts" ] && procd_append_param command $logopts
 	procd_append_param command "$CONFIGFILE"
 	procd_set_param netdev $netdevs
+	# restart when the generated config changes (settings saved in LuCI/uci)
+	procd_set_param file "$CONFIGFILE"
 	procd_set_param respawn
 	procd_set_param stderr 1
 
