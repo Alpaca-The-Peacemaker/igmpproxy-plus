@@ -72,6 +72,7 @@ P=$REPO/opnsense/net/igmp-proxy-plus
 PSTAGE=$WORK/stage-plugin
 mkdir -p "$PSTAGE/usr/local"
 cp -R "$P/src/." "$PSTAGE/usr/local/"
+find "$PSTAGE/usr/local/opnsense/scripts" -type f -name '*.php' -exec chmod 755 {} +
 PVER=$(sed -n 's/^PLUGIN_VERSION=[[:space:]]*//p' "$P/Makefile")
 mkdir -p "$PSTAGE/usr/local/opnsense/version"
 VERSION_JSON=$(cat <<EOF

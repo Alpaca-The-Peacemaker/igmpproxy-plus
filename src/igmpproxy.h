@@ -63,6 +63,15 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+/* FreeBSD has MAXLOGNAME instead of the POSIX LOGIN_NAME_MAX */
+#ifndef LOGIN_NAME_MAX
+# ifdef MAXLOGNAME
+#  define LOGIN_NAME_MAX MAXLOGNAME
+# else
+#  define LOGIN_NAME_MAX 256
+# endif
+#endif
+
 /*
  * Limit on length of route data
  */
