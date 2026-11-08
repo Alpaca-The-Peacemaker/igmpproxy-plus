@@ -14,8 +14,8 @@ If you watch IPTV (TV from your internet provider) or use other multicast stream
 your router runs an **IGMP proxy**. It asks the provider for a channel when a TV wants it, and
 should stop it when the TV changes channel.
 
-igmpproxy-plus is a drop-in replacement for the standard `igmpproxy` on **OpenWrt** (and,
-soon, **OPNsense**) that does this job much faster and gives you control over it:
+igmpproxy-plus is a drop-in replacement for the standard `igmpproxy` on **OpenWrt** and
+**OPNsense** (beta) that does this job much faster and gives you control over it:
 
 - **Channels stop within 0 to 2 seconds** after a channel change, instead of about 20 seconds.
 - **Fewer streams at once** on your Wi-Fi, switch and internet line while you zap.
@@ -102,10 +102,53 @@ reboot.
 
 ## Install on OPNsense
 
-**Not available yet.** The OPNsense plugin (settings and status pages under Services → IGMP
-Proxy Plus) is written but not built or tested yet. Until then, please keep using the standard
-`os-igmp-proxy` plugin. This section will get the same install and restore commands once it is
-ready; follow the [releases](https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases).
+> **Beta:** the OPNsense packages build and pass their checks, but have not yet been tested on
+> a real OPNsense box. Try it on a test system first, and keep the rollback command handy.
+
+Works on **OPNsense 26.7** (FreeBSD 15) and **25.7 / 26.1** (FreeBSD 14), amd64.
+
+### 1. Install (backs up automatically)
+
+Open a shell on OPNsense (SSH, or the console menu option 8) and paste:
+
+```sh
+fetch -o /tmp/install-opnsense.sh https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases/latest/download/install-opnsense.sh && sh /tmp/install-opnsense.sh
+```
+
+What it does, step by step:
+
+1. Downloads the packages for your OPNsense version.
+2. **Saves a backup** to `/conf/igmpproxy-plus-backup/`: a copy of `/conf/config.xml` and which
+   IGMP proxy packages were installed.
+3. Replaces the stock **IGMP Proxy** plugin (`os-igmp-proxy`) with **IGMP Proxy Plus**.
+4. **Imports your stock IGMP Proxy settings** (interfaces, networks) so IPTV keeps working. The
+   stock settings stay in your configuration, untouched.
+5. Starts the proxy and checks that it runs. **If anything fails, it rolls back on its own.**
+
+OPNsense also keeps every configuration change itself, under **System → Configuration →
+History**.
+
+### 2. Restore the previous version
+
+```sh
+igmpproxy-plus-install rollback
+```
+
+This puts back what you had before the last install or upgrade: the stock IGMP Proxy plugin
+(which finds its old settings again) or the previous IGMP Proxy Plus. To go back to the stock
+plugin permanently:
+
+```sh
+igmpproxy-plus-install uninstall
+```
+
+### 3. Use it
+
+- **Settings and live status:** Services → IGMP Proxy Plus
+- **Upgrade later:** `igmpproxy-plus-install`
+- **Check versions and the saved backup:** `igmpproxy-plus-install status`
+- As with the stock plugin, your firewall rules must allow IGMP and the multicast traffic
+  (with "allow options" enabled on the rule).
 
 ## Recommended settings
 
@@ -319,6 +362,6 @@ docs/                                 illustrations and plans
 
 ## Roadmap
 
-- OPNsense plugin and FreeBSD port: build, test, one-line install
+- OPNsense: test on real hardware, then drop the beta label
 - Official OpenWrt and OPNsense package submission
 - Source-specific multicast (RFC 4605 source filtering), only if someone needs it
