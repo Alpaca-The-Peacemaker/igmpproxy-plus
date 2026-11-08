@@ -34,10 +34,10 @@ else
 fi
 
 # --- SDK ----------------------------------------------------------------------
-line=$(curl -fsSL "$BASE/sha256sums" | grep -E 'openwrt-sdk-.*\.tar\.(zst|xz)$')
+line=$(curl -fsSL --retry 5 --retry-all-errors --http1.1 "$BASE/sha256sums" | grep -E 'openwrt-sdk-.*\.tar\.(zst|xz)$')
 sum=${line%% *}
 file=${line##*\*}
-[ -f "$WORK/$file" ] || curl -fsSL -o "$WORK/$file" "$BASE/$file"
+[ -f "$WORK/$file" ] || curl -fsSL --retry 5 --retry-all-errors --http1.1 -o "$WORK/$file" "$BASE/$file"
 echo "$sum  $WORK/$file" | sha256sum -c -
 
 SDK=$WORK/sdk-$REL-$(echo "$TGT" | tr / -)

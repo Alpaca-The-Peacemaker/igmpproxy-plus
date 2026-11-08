@@ -117,9 +117,10 @@ void rebuildIfVc () {
 
         memcpy( IfReq.ifr_name, Dp->Name, sizeof( IfReq.ifr_name ) );
 
-        if (ioctl(Sock, SIOCGIFINDEX, &IfReq ) < 0)
-            my_log(LOG_ERR, errno, "ioctl SIOCGIFINDEX for %s", IfReq.ifr_name);
-        Dp->ifIndex = IfReq.ifr_ifindex;
+        // if_nametoindex() is portable; SIOCGIFINDEX/ifr_ifindex is Linux only
+        Dp->ifIndex = if_nametoindex(IfReq.ifr_name);
+        if (Dp->ifIndex == 0)
+            my_log(LOG_ERR, errno, "if_nametoindex for %s", IfReq.ifr_name);
 
         // Get the subnet mask...
         if (ioctl(Sock, SIOCGIFNETMASK, &IfReq ) < 0)
@@ -273,9 +274,10 @@ void buildIfVc(void) {
 
             memcpy( IfReq.ifr_name, IfDescEp->Name, sizeof( IfReq.ifr_name ) );
 
-            if (ioctl(Sock, SIOCGIFINDEX, &IfReq ) < 0)
-                my_log(LOG_ERR, errno, "ioctl SIOCGIFINDEX for %s", IfReq.ifr_name);
-            IfDescEp->ifIndex = IfReq.ifr_ifindex;
+            // if_nametoindex() is portable; SIOCGIFINDEX/ifr_ifindex is Linux only
+            IfDescEp->ifIndex = if_nametoindex(IfReq.ifr_name);
+            if (IfDescEp->ifIndex == 0)
+                my_log(LOG_ERR, errno, "if_nametoindex for %s", IfReq.ifr_name);
 
             // Get the subnet mask...
             if (ioctl(Sock, SIOCGIFNETMASK, &IfReq ) < 0)
