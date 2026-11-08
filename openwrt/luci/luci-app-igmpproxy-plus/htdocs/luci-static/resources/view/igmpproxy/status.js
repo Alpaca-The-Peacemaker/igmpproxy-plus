@@ -208,8 +208,14 @@ return view.extend({
 		poll.add(function() {
 			return fetchStatus().then(function(st) {
 				var c = document.getElementById('igmpproxy-status');
-				if (c)
-					c.replaceChildren(render(st, names));
+				if (!c)
+					return;
+				// keep the details section open across refreshes
+				var d = c.querySelector('details');
+				var open = d && d.open;
+				c.replaceChildren(render(st, names));
+				if (open)
+					c.querySelector('details').open = true;
 			});
 		}, 2);
 
