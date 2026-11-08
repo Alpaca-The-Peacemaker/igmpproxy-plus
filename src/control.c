@@ -61,7 +61,11 @@ int controlFd(void) {
 
 static void writeAll(int fd, const char *buf, size_t len) {
     while (len > 0) {
+#ifdef MSG_NOSIGNAL
+        ssize_t n = send(fd, buf, len, MSG_NOSIGNAL);
+#else
         ssize_t n = write(fd, buf, len);
+#endif
         if (n < 0) {
             if (errno == EINTR)
                 continue;

@@ -147,16 +147,19 @@ igmp_add_firewall_routing() {
 		return 0
 	fi
 
-	# First drop SSDP packets then accept all other multicast
-	json_add_object ""
-	json_add_string type rule
-	json_add_string src "$upstream"
-	json_add_string dest "$zone"
-	json_add_string family ipv4
-	json_add_string proto udp
-	json_add_string dest_ip "239.255.255.250"
-	json_add_string target DROP
-	json_close_object
+	# Drop SSDP from upstream (unless proxy_ssdp is set), then accept all
+	# other multicast
+	if [ "$proxy_ssdp" != 1 ]; then
+		json_add_object ""
+		json_add_string type rule
+		json_add_string src "$upstream"
+		json_add_string dest "$zone"
+		json_add_string family ipv4
+		json_add_string proto udp
+		json_add_string dest_ip "239.255.255.250"
+		json_add_string target DROP
+		json_close_object
+	fi
 
 	json_add_object ""
 	json_add_string type rule

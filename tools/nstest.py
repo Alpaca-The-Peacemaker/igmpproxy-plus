@@ -196,7 +196,7 @@ def run(binary, label, extra):
         os.killpg(r1.p.pid, signal.SIGUSR1)
         time.sleep(6)
         ts = [t for t in pkt_times(dumps[2]) if t > t_leave - 2]
-        gaps = [b - a for a, b in zip(ts, ts[1:])]
+        gaps = [b - a for a, b in zip(ts, ts[1:])] + ([time.time() - 0.3 - ts[-1]] if ts else [])
         results["B_other_receiver_keeps_stream"] = {
             "packets_after_leave": len([t for t in ts if t > t_leave]),
             "max_gap_s": round(max(gaps), 3) if gaps else None,
@@ -232,7 +232,7 @@ def run(binary, label, extra):
             time.sleep(4)
             after = group_state()
             ts = [t for t in pkt_times(dumps[2]) if t > t_leave - 2]
-            gaps = [b - a for a, b in zip(ts, ts[1:])]
+            gaps = [b - a for a, b in zip(ts, ts[1:])] + ([time.time() - 0.3 - ts[-1]] if ts else [])
             results["C_simultaneous_joins"] = {
                 "hosts_before_leave": before["hosts"],
                 "leave_counted": after["leaves"] > before["leaves"],

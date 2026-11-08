@@ -83,7 +83,7 @@ do_rollback() {
 
 	case "$kind" in
 	plus)
-		tag=v$2
+		tag=v${2%%_*}          # 1.2.2_1 -> v1.2.2
 		if fetch_pkg "$RELEASES/download/$tag" "$DAEMON_PKG" && fetch_pkg "$RELEASES/download/$tag" "$PLUGIN_PKG"; then
 			pkg add -f "$TMP/$DAEMON_PKG" && pkg add -f "$TMP/$PLUGIN_PKG"
 		else

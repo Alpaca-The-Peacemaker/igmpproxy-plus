@@ -65,6 +65,7 @@ struct HostEntry {
     struct HostEntry   *next;
     uint32_t            addr;
     msec_t              expires;
+    msec_t              heard;      // last report from this host itself
 };
 
 struct VifState {
@@ -192,13 +193,14 @@ static void freeHosts(struct VifState *v) {
     v->overflow = false;
 }
 
-static void touchHost(struct VifState *v, uint32_t addr, msec_t expires) {
+static void touchHost(struct VifState *v, uint32_t addr, msec_t expires, msec_t now) {
     struct Config *conf = getCommonConfig();
     struct HostEntry *h;
 
     for (h = v->hosts; h; h = h->next) {
         if (h->addr == addr) {
             h->expires = expires;
+            h->heard = now;
             return;
         }
     }
@@ -216,6 +218,7 @@ static void touchHost(struct VifState *v, uint32_t addr, msec_t expires) {
     }
     h->addr = addr;
     h->expires = expires;
+    h->heard = now;
     h->next = v->hosts;
     v->hosts = h;
     v->nhosts++;
@@ -394,7 +397,7 @@ int insertRoute(uint32_t group, int ifx, uint32_t src, int version) {
             v->olderHost = now + ifGroupMembershipInterval(Dp);
         }
         if (src)
-            touchHost(v, src, exp);
+            touchHost(v, src, exp, now);
         if (version < 3) {
             // IGMPv1/v2 hosts that heard this report suppress their own, so
             // their silence does not mean they left: keep every known host of
@@ -424,6 +427,7 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     unsigned int lmqi, lmqc;
     int mode;
     bool drop, others;
+    unsigned int nrecent = 0;
 
     if (ifx < 0 || ifx >= MAXVIFS || ifx >= 32)
         return;
@@ -442,17 +446,30 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     removeHost(v, src);
     r->leaves++;
 
-    // Other hosts that reported this group on this interface and have not
-    // left: the group must keep flowing for them, whatever the mode, even if
-    // they are slow to answer (or ignore) the group specific query. Their own
-    // host timers end it if they left silently.
-    others = (v->hosts != NULL);
+    // Other hosts that reported this group on this interface themselves
+    // within the last query cycle and have not left: the group keeps flowing
+    // for them, whatever the mode, even if they are slow to answer (or
+    // ignore) the group specific query. A host only kept alive by others'
+    // reports (IGMPv2 suppression) and not heard for a whole cycle may be
+    // gone (e.g. powered off): it does not block the leave; if it is still
+    // there it answers the group specific query below.
+    {
+        struct Config *conf = getCommonConfig();
+        msec_t cycle = (msec_t)conf->queryInterval + conf->queryResponseInterval + 2000;
+        struct HostEntry *h;
+        unsigned int recent = 0;
+        for (h = v->hosts; h; h = h->next)
+            if (h->heard + cycle > now)
+                recent++;
+        others = recent > 0;
+        nrecent = recent;
+    }
 
     // With IGMPv3 queries, an IGMPv1/v2 host on the interface means hosts
     // may suppress each other's reports and the host list may be
     // incomplete: auto then behaves like off. With "queryversion 2" the
     // admin opted into v2 (e.g. behind IGMP snooping) and the list is trusted.
-    drop = !others && !v->overflow &&
+    drop = !others && v->hosts == NULL && !v->overflow &&
            ((mode == FASTLEAVE_ON) ||
             (mode == FASTLEAVE_AUTO &&
              (ifQueryVersion(Dp) == 2 || !(v->olderHost > now))));
@@ -464,7 +481,7 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
         freeHosts(v);
     } else if (others) {
         my_log(LOG_INFO, 0, "Group %s: leave from %s on %s, still watched by %u other host(s), keeps flowing",
-               inetFmt(group, s1), inetFmt(src, s2), Dp ? Dp->Name : "?", v->nhosts);
+               inetFmt(group, s1), inetFmt(src, s2), Dp ? Dp->Name : "?", nrecent);
     } else {
         msec_t lmqt = now + (msec_t)lmqi * lmqc;
         my_log(LOG_INFO, 0, "Group %s: leave from %s on %s, checking for other members (%ux%ums)",
@@ -819,8 +836,9 @@ void routeTableDumpJson(FILE *f, msec_t now) {
                     v->overflow ? "true" : "false",
                     (ifQueryVersion(Dv) == 2 || v->olderHost > now) ? "v2" : "v3");
             for (h = v->hosts; h; h = h->next) {
-                fprintf(f, "%s{\"address\":\"%s\",\"expires_in_ms\":%lld}",
-                        firstHost ? "" : ",", inetFmt(h->addr, buf), remainMs(h->expires, now));
+                fprintf(f, "%s{\"address\":\"%s\",\"expires_in_ms\":%lld,\"heard_ms_ago\":%llu}",
+                        firstHost ? "" : ",", inetFmt(h->addr, buf), remainMs(h->expires, now),
+                        (unsigned long long)(now - h->heard));
                 firstHost = 0;
             }
             fputs("]}", f);

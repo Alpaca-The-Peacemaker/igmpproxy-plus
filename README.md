@@ -10,16 +10,19 @@
 
 ## What it does
 
-If you watch IPTV (TV from your internet provider) or use other multicast streams at home,
-your router runs an **IGMP proxy**. It asks the provider for a channel when a TV wants it, and
-should stop it when the TV changes channel.
+Devices use **IGMP** to ask for **multicast** streams: IPTV boxes for TV channels, but also
+speakers, computers and other devices for multicast audio, video or data. When such a stream
+comes from your internet provider, your router runs an **IGMP proxy**: it asks the provider for
+the stream when a device wants it, and should stop it when no device needs it anymore. In most
+homes that means IPTV.
 
 igmpproxy-plus is a drop-in replacement for the standard `igmpproxy` on **OpenWrt** and
 **OPNsense** (beta) that does this job much faster and gives you control over it:
 
 - **Channels stop within 0 to 2 seconds** after a channel change, instead of about 20 seconds.
 - **Fewer streams at once** on your Wi-Fi, switch and internet line while you zap.
-- **Works with every TV box**: IGMPv1, v2 and v3 devices, alone or mixed.
+- **Works with every device**: IGMPv1, v2 and v3, alone or mixed, and several devices on the
+  same stream at once.
 - **Settings and a live status page** in the router's web interface: who is watching which
   channel, and when each stream will stop.
 - **Your existing settings keep working.** It reads the same configuration file.
@@ -152,16 +155,16 @@ igmpproxy-plus-install uninstall
 
 ## Recommended settings
 
-**A channel is never stopped while another known TV box is still watching it**, in every mode.
-With several boxes in the house on the same channel, one box changing channel or switching off
-does not interrupt the others. The modes only decide how fast a channel stops once the **last**
-box has left it (Settings → Leave behaviour):
+**A stream is never stopped while another device that asked for it is still receiving it**, in
+every mode. With several devices on the same stream (for example three IPTV boxes on one
+channel), one changing channel or switching off does not interrupt the others. The modes only
+decide how fast a stream stops once the **last** device has left it (Settings → Leave behaviour):
 
-| Fast leave | When the last box leaves a channel | Good for |
+| Fast leave | When the last device leaves a stream | Good for |
 |---|---|---|
 | **off** (default) | Stops after the check (2 × 1 s by default) | Everyone; the most conservative |
 | **on** | Stops instantly | Homes that want the fastest channel changes |
-| **auto** | Instantly with IGMPv3 boxes, after the check with IGMPv2 boxes | Mixed or newer equipment |
+| **auto** | Instantly with IGMPv3 devices, after the check with IGMPv2 devices | Mixed or newer equipment |
 
 Keep the **last member query interval at 1000 ms** unless you know your boxes answer quickly:
 slow IPTV boxes need that time to answer the router's "anyone still watching?" check. The
@@ -175,9 +178,17 @@ No. igmpproxy-plus tracks every box that asked for a channel and keeps the chann
 long as any of them is still watching, even if a box is slow to answer (or ignores) the router's
 checks. This is tested with up to three boxes on one channel, including a box that never answers.
 
+**Which devices use IGMP? Does this affect Sonos, Chromecast, YouTube or Netflix?**
+Many devices use multicast. IPTV boxes do, and speakers (Sonos, AirPlay), Chromecast, printers
+and computers use it mostly for discovery *inside* your home. igmpproxy-plus only handles
+multicast that comes **from your internet provider into your network**, which in practice means
+IPTV. Multicast between devices inside your home never goes through it, and local discovery
+groups are never forwarded to your provider. YouTube, Netflix and most streaming apps don't use
+multicast at all.
+
 **Does it work with my TV box?**
 Yes. igmpproxy-plus supports IGMPv1, v2 and v3 devices, alone and mixed on the same network.
-Every release is tested against 48 combinations of device versions, settings and multi-box cases
+Every release is tested against 54 combinations of device versions, settings and multi-device cases
 (`tools/compat-test.py`), and it runs on a real router with IGMPv2 IPTV boxes.
 
 **Will my current settings be lost?**
@@ -329,6 +340,7 @@ sudo ./src/igmpproxy -S                        # live group table (JSON)
 sudo python3 tools/nstest.py ./src/igmpproxy plus-auto "fastleave auto"   # leave times
 sudo python3 tools/compat-test.py ./src/igmpproxy                         # IGMPv1/v2/v3 matrix
 sudo python3 tools/linklocal-test.py ./src/igmpproxy                      # 224.0.0.x never proxied
+sudo python3 tools/robustness-test.py ./src/igmpproxy                     # status clients that hang up
 sudo sh tools/test-installer.sh                                           # installer, throwaway box only
 ```
 

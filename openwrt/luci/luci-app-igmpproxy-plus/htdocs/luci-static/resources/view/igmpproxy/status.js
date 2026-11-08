@@ -11,7 +11,7 @@ var callLeases = rpc.declare({
 	expect: { '': {} }
 });
 
-/* Local discovery groups, shown under "Other" rather than as TV channels. */
+/* Local discovery groups, shown under "Other" rather than as streams. */
 var KNOWN = {
 	'239.255.255.250': _('UPnP / SSDP discovery'),
 	'224.0.0.251': _('mDNS / Bonjour'),
@@ -97,14 +97,14 @@ function table(headers, rows, empty) {
 /* Plain-language state of one channel on the LAN. */
 function channelState(g) {
 	if (!g.members.length)
-		return [dot('#999'), _('no viewers')];
+		return [dot('#999'), _('no receivers')];
 	var m = g.members[0];
 	if (!m.forwarding)
-		return [dot('#999'), _('stopped, waiting for a viewer to answer')];
+		return [dot('#999'), _('stopped, waiting for a device to answer')];
 	if (g.leave_in_ms >= 0)
 		return [dot('#e0a000'), _('stopping in %s').format(secs(g.leave_in_ms))];
 	if (m.last_member_queries_left > 0 || m.expires_in_ms < 5000)
-		return [dot('#e0a000'), _('a viewer left, checking for others (%s)').format(secs(m.expires_in_ms))];
+		return [dot('#e0a000'), _('a device left, checking for others (%s)').format(secs(m.expires_in_ms))];
 	return [dot('#2e9e44'), _('streaming')];
 }
 
@@ -134,12 +134,12 @@ function render(st, names) {
 
 	var stopAfter = c.fastleave === 'on' ? _('instantly')
 		: c.fastleave === 'auto' ? _('instantly (IGMPv3 boxes) or after %s').format(secs(c.last_member_query_count * c.last_member_query_interval_ms))
-		: _('%s after the last viewer leaves').format(secs(c.last_member_query_count * c.last_member_query_interval_ms));
+		: _('%s after the last device leaves').format(secs(c.last_member_query_count * c.last_member_query_interval_ms));
 
 	var summary = E('div', { 'class': 'cbi-section', 'style': 'padding:.8em 1em;font-size:110%' }, [
 		dot('#2e9e44'), E('strong', {}, _('Running')), ' · ',
-		_('%d device(s) watching %d channel(s)').format(hosts.length, tv.length), ' · ',
-		_('old channels stop %s').format(stopAfter),
+		_('%d device(s) receiving %d stream(s)').format(hosts.length, tv.length), ' · ',
+		_('streams stop %s').format(stopAfter),
 		E('div', { 'style': 'font-size:85%;opacity:.7;margin-top:.3em' },
 			_('Fast leave: %s · IGMPv%d queries · up %s').format(c.fastleave, c.query_version || 2, dur(st.uptime_ms)))
 	]);
@@ -177,17 +177,17 @@ function render(st, names) {
 	var ifRows = st.interfaces.map(function(i) {
 		return [
 			i.name, i.address,
-			i.state === 'upstream' ? _('Upstream (towards the provider)') : _('Downstream (towards the TVs)'),
+			i.state === 'upstream' ? _('Upstream (towards the provider)') : _('Downstream (towards your devices)'),
 			i.state === 'downstream' ? _('%s, checks %d × %d ms, timeout %s').format(i.fastleave, i.last_member_query_count, i.last_member_query_interval_ms, dur(i.group_membership_interval_ms)) : '-'
 		];
 	});
 
 	return E('div', {}, [
 		summary,
-		E('h3', {}, _('Who is watching')),
-		table([_('Device'), _('Channels'), _('IGMP')], watchRows, _('Nobody is watching right now')),
-		E('h3', {}, _('Channels')),
-		table([_('Channel'), _('State'), _('Viewers'), _('Running for')], chanRows, _('No channels are streaming')),
+		E('h3', {}, _('Devices')),
+		table([_('Device'), _('Streams'), _('IGMP')], watchRows, _('No device is receiving a stream right now')),
+		E('h3', {}, _('Streams')),
+		table([_('Stream (group)'), _('State'), _('Receiving'), _('Running for')], chanRows, _('No streams right now')),
 		E('details', { 'style': 'margin-top:1.5em' }, [
 			E('summary', { 'style': 'cursor:pointer' }, _('Details: interfaces and other multicast')),
 			table([_('Interface'), _('Address'), _('Role'), _('Leave settings')], ifRows, _('No interfaces')),
@@ -221,7 +221,7 @@ return view.extend({
 
 		return E('div', { 'class': 'cbi-map' }, [
 			E('h2', {}, _('IGMP Proxy')),
-			E('div', { 'class': 'cbi-map-descr' }, _('Which TVs are watching which channels, live.')),
+			E('div', { 'class': 'cbi-map-descr' }, _('Which devices (IPTV boxes, speakers, computers...) receive which multicast streams from your provider, live.')),
 			container
 		]);
 	},

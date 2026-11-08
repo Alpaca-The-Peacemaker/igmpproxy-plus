@@ -133,13 +133,14 @@ do_rollback() {
 		pkg_add_stock || die "could not reinstall stock igmpproxy (no internet?). Try: $([ "$PM" = apk ] && echo "apk add" || echo "opkg install") igmpproxy"
 		;;
 	plus)
-		tag=v${ver%-r*}
+		tag=v${ver%-*}         # 1.2.1-r1 (apk) or 1.2.1-1 (opkg) -> v1.2.1
 		pkg=igmpproxy-plus-$SERIES-$ARCH.$EXT
 		luci=luci-app-igmpproxy-plus-$SERIES.$EXT
 		if fetch "$RELEASES/download/$tag" "$pkg" && fetch "$RELEASES/download/$tag" "$luci"; then
-			pkg_add_files "$TMP/$pkg" "$TMP/$luci"
+			pkg_add_files "$TMP/$pkg" "$TMP/$luci" || INCOMPLETE=1
 		else
-			say "release $tag is not on GitHub, keeping the installed version and restoring only the config"
+			say "could not download release $tag: the installed version stays, only the config is restored"
+			INCOMPLETE=1
 		fi
 		;;
 	none)
@@ -153,11 +154,15 @@ do_rollback() {
 
 	restore_config
 	if [ "$kind" != none ]; then
-		/etc/init.d/igmpproxy enable
-		/etc/init.d/igmpproxy restart
+		/etc/init.d/igmpproxy enable || true
+		/etc/init.d/igmpproxy restart || say "restart reported an error"
 	fi
 	rm -f /etc/config/igmpproxy.apk-new /etc/config/igmpproxy-opkg
 	rm -rf "$TMP"
+	if [ "${INCOMPLETE:-0}" = 1 ]; then
+		say "rollback INCOMPLETE: the previous version could not be reinstalled"
+		return 1
+	fi
 	say "rollback done"
 }
 
@@ -200,8 +205,8 @@ do_install() {
 	fi
 	rm -f /etc/config/igmpproxy.apk-new /etc/config/igmpproxy-opkg
 
-	/etc/init.d/igmpproxy enable
-	/etc/init.d/igmpproxy restart
+	/etc/init.d/igmpproxy enable || true
+	/etc/init.d/igmpproxy restart || say "restart reported an error"
 	rm -f /tmp/luci-indexcache* 2>/dev/null || true
 
 	# Automatic rollback if it was running before and does not come up now.
@@ -237,8 +242,8 @@ do_uninstall() {
 	say "installing the stock igmpproxy package"
 	pkg_add_stock || die "could not install stock igmpproxy (no internet?). Undo with: igmpproxy-plus-install rollback"
 	restore_config
-	/etc/init.d/igmpproxy enable
-	/etc/init.d/igmpproxy restart
+	/etc/init.d/igmpproxy enable || true
+	/etc/init.d/igmpproxy restart || say "restart reported an error"
 	say "back on stock igmpproxy. Options only igmpproxy-plus knows are ignored."
 }
 

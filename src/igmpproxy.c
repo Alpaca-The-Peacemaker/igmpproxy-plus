@@ -236,6 +236,9 @@ int igmpProxyInit(void) {
     struct sigaction sa;
     int Err;
 
+    // A status client that disconnects mid-reply must not kill the proxy.
+    signal(SIGPIPE, SIG_IGN);
+
     sa.sa_handler = signalHandler;
     sa.sa_flags = 0;    /* Interrupt system calls */
     sigemptyset(&sa.sa_mask);

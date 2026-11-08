@@ -4,9 +4,7 @@
 'require uci';
 'require tools.widgets as widgets';
 
-var fastLeaveHelp = _('<b>Off</b>: RFC behaviour, keep forwarding until the last member queries time out (count x interval). ' +
-	'<b>On</b>: stop forwarding on that interface as soon as any host leaves; other hosts re-join within milliseconds after the follow-up query. Best for one receiver per port, IPTV set-top boxes. ' +
-	'<b>Auto</b>: stop at once when the last known host on that interface leaves, otherwise do the RFC check. Needs a switch with IGMP snooping so hosts do not suppress each other\'s reports.');
+var fastLeaveHelp = _('<b>A stream never stops while another device that asked for it is still receiving it</b>, in every mode. The modes only decide how fast it stops once the last device has left. <b>Off</b>: after the router checks that nobody else is still receiving (count x interval). <b>On</b>: instantly. <b>Auto</b>: instantly with IGMPv3 devices, after the check with IGMPv2 devices.');
 
 function validateRange(min, max, unit) {
 	return function(section_id, value) {

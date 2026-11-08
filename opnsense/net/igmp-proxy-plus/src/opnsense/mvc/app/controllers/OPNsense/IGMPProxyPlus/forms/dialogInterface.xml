@@ -13,7 +13,7 @@
         <id>interface.direction</id>
         <label>Direction</label>
         <type>dropdown</type>
-        <help>Upstream faces the multicast source (WAN / IPTV VLAN). Downstream faces the receivers.</help>
+        <help>Upstream faces the multicast source (WAN / IPTV VLAN). Downstream faces your devices (IPTV boxes, speakers, computers).</help>
     </field>
     <field>
         <id>interface.description</id>

@@ -65,6 +65,10 @@ running)
 	P=/var/mockwrt/pkgs
 	if [ -f $P/igmpproxy-plus ]; then [ "$(cat $P/igmpproxy-plus)" != "$(cat /var/mockwrt/broken_version 2>/dev/null)" ]
 	else [ -f $P/igmpproxy ]; fi ;;
+restart)
+	P=/var/mockwrt/pkgs
+	[ -f /var/mockwrt/fail_restart ] && [ -f $P/igmpproxy-plus ] && 		[ "$(cat $P/igmpproxy-plus)" = "$(cat /var/mockwrt/broken_version 2>/dev/null)" ] && exit 1
+	exit 0 ;;
 *) exit 0 ;;
 esac
 EOF
@@ -136,6 +140,36 @@ run
 check "exit code" "$(cat "$MOCK/rc")" 1
 check "stock untouched" "$(ver igmpproxy)" "0.4-r1"
 check "no backup made" "$([ -d /etc/igmpproxy-plus-backup ] && echo yes || echo no)" no
+
+echo "7. failed restart still triggers the automatic rollback"
+setup
+echo "0.4-r1" > "$MOCK/pkgs/igmpproxy"
+echo "1.0.2-r1" > "$MOCK/broken_version"
+touch "$MOCK/fail_restart"
+run
+rm -f "$MOCK/fail_restart"
+check "exit code" "$(cat "$MOCK/rc")" 1
+check "stock back" "$(ver igmpproxy)" "0.4-r1"
+check "plus removed" "$(ver igmpproxy-plus)" "-"
+
+echo "8. rollback from an opkg-style version (1.0.1-1, OpenWrt 24.10)"
+setup
+echo "1.0.1-1" > "$MOCK/pkgs/igmpproxy-plus"
+run
+check "upgraded" "$(ver igmpproxy-plus)" "1.0.2-r1"
+run rollback
+check "exit code" "$(cat "$MOCK/rc")" 0
+check "back on 1.0.1" "$(ver igmpproxy-plus)" "1.0.1-r1"
+
+echo "9. rollback whose download fails reports failure"
+setup
+echo "1.0.1-r1" > "$MOCK/pkgs/igmpproxy-plus"
+run
+touch "$MOCK/fail_download"
+run rollback
+rm -f "$MOCK/fail_download"
+check "exit code" "$(cat "$MOCK/rc")" 1
+check "says incomplete" "$(grep -c INCOMPLETE "$MOCK/out")" 1
 
 echo
 if [ "$FAILS" = 0 ]; then echo "all installer tests passed"; else echo "$FAILS installer checks failed"; exit 1; fi
