@@ -265,9 +265,13 @@ def run(binary, label, extra):
 
         with open(downd) as f:
             q = [l for l in f if "query" in l]
+        general = [l for l in q if "gaddr" not in l]
         results["queries_on_lan"] = {
             "v3": sum("query v3" in l for l in q),
             "v2": sum("query v2" in l for l in q),
+            # periodic general queries; group specific ones may be v2 on purpose
+            "general_v3": sum("query v3" in l for l in general),
+            "general_v2": sum("query v2" in l for l in general),
         }
         with open(upd) as f:
             results["upstream_igmp"] = [l.strip() for l in f if "igmp" in l.lower()][-6:]

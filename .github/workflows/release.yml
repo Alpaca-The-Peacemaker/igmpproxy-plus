@@ -37,7 +37,10 @@ jobs:
           import json
           r = json.load(open("v3.json"))
           print(r["C_simultaneous_joins"], r["D_igmpv2_host"], r["queries_on_lan"])
-          assert r["queries_on_lan"]["v3"] > 0 and r["queries_on_lan"]["v2"] == 0, "queries are not IGMPv3"
+          q = r["queries_on_lan"]
+          # general queries must be IGMPv3; group specific queries are sent in
+          # IGMPv2 format on purpose while an IGMPv2 host is present
+          assert q["general_v3"] > 0 and q["general_v2"] == 0, "general queries are not IGMPv3"
           c = r["C_simultaneous_joins"]
           assert len(c["hosts_before_leave"]) == 2, "both receivers must be tracked"
           assert c["leave_counted"], "the first receiver's leave must arrive"
