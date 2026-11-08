@@ -191,7 +191,7 @@ function render(st, names) {
 		E('details', { 'style': 'margin-top:1.5em' }, [
 			E('summary', { 'style': 'cursor:pointer' }, _('Details: interfaces and other multicast')),
 			table([_('Interface'), _('Address'), _('Role'), _('Leave settings')], ifRows, _('No interfaces')),
-			table([_('Group'), _('What it is'), _('Devices')], otherRows, _('None'))
+			otherRows.length ? table([_('Group'), _('What it is'), _('Devices')], otherRows, '') : ''
 		])
 	]);
 }
