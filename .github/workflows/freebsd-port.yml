@@ -1,0 +1,38 @@
+name: FreeBSD port
+
+# Builds opnsense/port/net/igmpproxy-plus with the real FreeBSD ports
+# framework (portlint, stage, check-plist, package), as a FreeBSD ports
+# committer would before accepting it.
+
+on:
+  push:
+    branches: ['main']
+    paths: ['opnsense/port/**', '.github/workflows/freebsd-port.yml']
+  workflow_dispatch:
+
+jobs:
+  port:
+    name: ports framework, FreeBSD 15.1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the port in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: '15.1'
+          usesh: true
+          run: |
+            set -e
+            pkg install -y git autoconf automake portlint
+            git clone -q --depth 1 --filter=blob:none --sparse https://git.freebsd.org/ports.git /usr/ports
+            cd /usr/ports
+            git sparse-checkout set --no-cone /Mk /Templates /Keywords /net/Makefile /Makefile
+            mkdir -p net
+            cp -R "$GITHUB_WORKSPACE/opnsense/port/net/igmpproxy-plus" net/
+            cd net/igmpproxy-plus
+            portlint -AC
+            make BATCH=yes DISABLE_VULNERABILITIES=yes stage
+            make BATCH=yes check-plist
+            make BATCH=yes package
+            make BATCH=yes stage-qa
+            ls -l work/pkg/

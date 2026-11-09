@@ -1,5 +1,5 @@
 PORTNAME=	igmpproxy-plus
-DISTVERSION=	1.0.1
+DISTVERSION=	1.2.4
 CATEGORIES=	net
 
 MAINTAINER=	8hx8dfdss2@privaterelay.appleid.com
