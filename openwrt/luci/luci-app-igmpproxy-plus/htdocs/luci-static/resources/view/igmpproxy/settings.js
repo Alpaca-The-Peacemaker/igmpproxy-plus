@@ -117,6 +117,26 @@ return view.extend({
 			_('By default UPnP discovery traffic is kept local and never joined upstream. Enable only if you really need SSDP from the upstream network.'));
 		o.default = '0';
 
+		o = s.taboption('advanced', form.Flag, 'event_log', _('Event log'),
+			_('Keep a history of joins, leaves, stream starts and stops, timeouts and queries (Services > IGMP Proxy > Events). One JSON object per line, easy to analyse with scripts or an AI assistant.'));
+		o.default = '1';
+
+		o = s.taboption('advanced', form.Value, 'event_log_path', _('Event log file'),
+			_('/tmp is RAM: cleared on reboot, never wears the flash. Point it to a USB stick to keep it across reboots.'));
+		o.placeholder = '/tmp/igmpproxy-events.jsonl';
+		o.depends('event_log', '1');
+
+		o = s.taboption('advanced', form.Value, 'event_log_size', _('Event log size (KiB)'),
+			_('When the file reaches this size it is renamed to .1 and a new one starts, so at most twice this is kept. 1024 KiB holds about one to two days on a typical home network.'));
+		o.datatype = 'range(16,65536)';
+		o.placeholder = '1024';
+		o.depends('event_log', '1');
+
+		o = s.taboption('advanced', form.Flag, 'event_log_reports', _('Log periodic reports and queries'),
+			_('Also log the routine "still receiving" reports and the periodic queries. Shows exactly when each device last answered; turn off for a shorter log.'));
+		o.default = '1';
+		o.depends('event_log', '1');
+
 		o = s.taboption('advanced', form.ListValue, 'verbose', _('Log level'));
 		o.value('1', _('Warnings'));
 		o.value('2', _('Info (joins, leaves, fast leave)'));

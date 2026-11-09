@@ -191,6 +191,36 @@ falls back to the RFC behaviour for that group and interface.
 UNIX socket that returns the live group table as JSON, default
 /var/run/igmpproxy.sock. Read it with
 .BR "igmpproxy -S" .
+.B "igmpproxy -Q"
+sends a general query through it, so every member reports again.
+.RE
+
+.B eventlog
+.IR path | off
+.RS
+Write an event log: one JSON object per line for every join, leave,
+start and stop of forwarding (with the reason), host timeout, IGMPv2
+compatibility change, upstream join and leave, and query. Each line has
+"ts" (UTC), "ev", and where it applies "group", "if" and "host". Read it
+with
+.BR "igmpproxy -E" ,
+which prints the rotated file followed by the current one. Off by default.
+.RE
+
+.B eventlogsize
+.I KiB
+.RS
+Rotate the event log at this size: the file is renamed to
+.IR path .1
+(replacing the previous one), so at most twice this size is kept.
+Default 1024, 0 never rotates.
+.RE
+
+.B eventlogreports
+.BR on | off
+.RS
+Also log the periodic reports of members that are already known and the
+periodic general queries. Default on.
 .RE
 
 .B hashtablesize

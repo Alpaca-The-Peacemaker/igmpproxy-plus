@@ -3,6 +3,7 @@ igmpproxy_SOURCES = \
 	callout.c \
 	config.c \
 	control.c \
+	eventlog.c \
 	confread.c \
 	ifvc.c \
 	igmp.c \

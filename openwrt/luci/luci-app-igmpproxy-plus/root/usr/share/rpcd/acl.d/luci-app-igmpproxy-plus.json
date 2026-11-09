@@ -5,6 +5,9 @@
 			"file": {
 				"/usr/sbin/igmpproxy -S": [
 					"exec"
+				],
+				"/usr/sbin/igmpproxy -E": [
+					"exec"
 				]
 			},
 			"ubus": {
@@ -22,7 +25,17 @@
 		"write": {
 			"uci": [
 				"igmpproxy"
-			]
+			],
+			"file": {
+				"/usr/sbin/igmpproxy -Q": [
+					"exec"
+				]
+			},
+			"ubus": {
+				"file": [
+					"exec"
+				]
+			}
 		}
 	}
 }

@@ -65,6 +65,8 @@ jobs:
         run: sudo python3 tools/robustness-test.py "$PWD/src/igmpproxy"
       - name: Link-local groups (224.0.0.x) are never proxied
         run: sudo python3 tools/linklocal-test.py "$PWD/src/igmpproxy"
+      - name: Event log, refresh query and log rotation
+        run: sudo python3 tools/eventlog-test.py "$PWD/src/igmpproxy"
 
   installer:
     name: Installer backup and rollback test

@@ -7,14 +7,19 @@
 **  (at your option) any later version.
 */
 /**
-*   control.c - UNIX stream socket that returns the live group table as
-*   JSON. The daemon writes one JSON document per connection and closes
-*   it. "igmpproxy -S [path]" is the matching client, used by the
-*   OPNsense and LuCI status pages.
+*   control.c - UNIX stream socket for the status pages and scripts.
+*   A client may send one command line, then the daemon answers and
+*   closes the connection:
+*     "status"  (or nothing)  the live group table as JSON
+*     "events"                the event log (JSON Lines), oldest first
+*     "query"                 send a general query on every downstream
+*                             interface now, so all members report again
+*   "igmpproxy -S|-E|-Q [path]" is the matching client.
 */
 
 #include "igmpproxy.h"
 
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -59,6 +64,12 @@ int controlFd(void) {
     return ctlFd;
 }
 
+static void writeAll(int fd, const char *buf, size_t len);
+
+static void writeStr(int fd, const char *str) {
+    writeAll(fd, str, strlen(str));
+}
+
 static void writeAll(int fd, const char *buf, size_t len) {
     while (len > 0) {
 #ifdef MSG_NOSIGNAL
@@ -78,13 +89,24 @@ static void writeAll(int fd, const char *buf, size_t len) {
 
 void controlAccept(void) {
     int fd;
-    char *buf = NULL;
+    char *buf = NULL, cmd[32] = "";
     size_t len = 0;
     FILE *f;
+    struct pollfd pfd;
 
     fd = accept(ctlFd, NULL, NULL);
     if (fd < 0)
         return;
+
+    // Optional command line. Clients send it right after connecting; one
+    // that sends nothing (older clients) gets the status after 100 ms.
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    if (poll(&pfd, 1, 100) > 0) {
+        ssize_t n = recv(fd, cmd, sizeof(cmd) - 1, 0);
+        cmd[n > 0 ? n : 0] = '\0';
+        cmd[strcspn(cmd, " \r\n")] = '\0';
+    }
 
     // Blocking writes with a short timeout so a stuck client cannot stall
     // the proxy for long.
@@ -96,12 +118,22 @@ void controlAccept(void) {
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     }
 
-    f = open_memstream(&buf, &len);
-    if (f) {
-        routeTableDumpJson(f, now_ms());
-        fclose(f);
-        writeAll(fd, buf, len);
-        free(buf);
+    if (!strcmp(cmd, "events")) {
+        if (!eventLogDump(writeAll, fd))
+            writeStr(fd, "{\"error\":\"event log is off (eventlog option)\"}\n");
+    } else if (!strcmp(cmd, "query")) {
+        sendGeneralQueriesNow("requested");
+        writeStr(fd, "{\"ok\":true,\"sent\":\"general query\"}\n");
+    } else if (!cmd[0] || !strcmp(cmd, "status")) {
+        f = open_memstream(&buf, &len);
+        if (f) {
+            routeTableDumpJson(f, now_ms());
+            fclose(f);
+            writeAll(fd, buf, len);
+            free(buf);
+        }
+    } else {
+        writeStr(fd, "{\"error\":\"unknown command\"}\n");
     }
     close(fd);
 }
@@ -115,9 +147,10 @@ void controlCleanUp(void) {
 }
 
 /**
-*   Client mode: print the status JSON to stdout. Returns exit code.
+*   Client mode: send 'cmd' and print the answer to stdout. Returns exit
+*   code (3 when the daemon answered with an error object).
 */
-int controlClient(const char *path) {
+int controlClient(const char *path, const char *cmd) {
     struct sockaddr_un sa;
     char buf[4096];
     ssize_t n;
@@ -136,8 +169,18 @@ int controlClient(const char *path) {
         fprintf(stderr, "igmpproxy: cannot connect to %s: %s\n", path, strerror(errno));
         return 1;
     }
-    while ((n = read(fd, buf, sizeof(buf))) > 0)
-        fwrite(buf, 1, (size_t)n, stdout);
-    close(fd);
-    return 0;
+    writeAll(fd, cmd, strlen(cmd));
+    writeAll(fd, "\n", 1);
+    shutdown(fd, SHUT_WR);
+    {
+        bool first = true, err = false;
+        while ((n = read(fd, buf, sizeof(buf))) > 0) {
+            if (first && n > 9 && !strncmp(buf, "{\"error\":", 9))
+                err = true;
+            first = false;
+            fwrite(buf, 1, (size_t)n, stdout);
+        }
+        close(fd);
+        return err ? 3 : 0;
+    }
 }

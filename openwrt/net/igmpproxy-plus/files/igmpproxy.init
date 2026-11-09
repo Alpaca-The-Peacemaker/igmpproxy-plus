@@ -63,6 +63,19 @@ igmp_header() {
 	emit_opt "$s" upstream_leave_delay upstreamleavedelay ms
 	emit_opt "$s" host_limit hostlimit
 	emit_opt "$s" query_version queryversion
+
+	# event log (JSON Lines): /tmp is RAM, so it never wears the flash
+	config_get_bool event_log "$s" event_log 1
+	if [ "$event_log" = 1 ]; then
+		config_get event_log_path "$s" event_log_path /tmp/igmpproxy-events.jsonl
+		config_get event_log_size "$s" event_log_size 1024
+		config_get_bool event_log_reports "$s" event_log_reports 1
+		{
+			echo "eventlog $event_log_path"
+			echo "eventlogsize $event_log_size"
+			[ "$event_log_reports" = 1 ] && echo "eventlogreports on" || echo "eventlogreports off"
+		} >> "$CONFIGFILE"
+	fi
 }
 
 # --- interfaces ------------------------------------------------------------

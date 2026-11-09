@@ -113,6 +113,9 @@ static void initCommonConfig(void) {
     commonConfig.queryVersion = 3;
     snprintf(commonConfig.controlSocket, sizeof(commonConfig.controlSocket),
              "%s", "/var/run/igmpproxy.sock");
+    commonConfig.eventLog[0] = '\0';
+    commonConfig.eventLogSize = 1024 * 1024;
+    commonConfig.eventLogReports = true;
 
     // aimwang: default value
     commonConfig.defaultInterfaceState = IF_STATE_DISABLED;
@@ -358,6 +361,22 @@ int loadConfig(char *configFile) {
         }
         else if(strcmp("hostlimit", token)==0) {
             commonConfig.hostLimit = parseUInt(key, needValue(key), 0, 65535);
+        }
+        else if(strcmp("eventlog", token)==0) {
+            token = needValue("eventlog");
+            if (!strcmp(token, "none") || !strcmp(token, "off"))
+                commonConfig.eventLog[0] = '\0';
+            else if (snprintf(commonConfig.eventLog, sizeof(commonConfig.eventLog),
+                              "%s", token) >= (int)sizeof(commonConfig.eventLog))
+                my_log(LOG_ERR, 0, "Config: eventlog path too long");
+        }
+        else if(strcmp("eventlogsize", token)==0) {
+            // KiB; 0 = never rotate
+            commonConfig.eventLogSize = parseUInt(key, needValue(key), 0, 1024 * 1024) * 1024;
+        }
+        else if(strcmp("eventlogreports", token)==0) {
+            token = needValue("eventlogreports");
+            commonConfig.eventLogReports = !(!strcmp(token, "off") || !strcmp(token, "0") || !strcmp(token, "no"));
         }
         else if(strcmp("controlsocket", token)==0) {
             token = needValue("controlsocket");

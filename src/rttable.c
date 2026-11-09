@@ -167,11 +167,13 @@ static void sendJoinLeaveUpstream(struct RouteTable* route, int join) {
                    inetFmt(route->group, s1), upstrIf->Name);
             k_join(upstrIf, route->group);
             BIT_SET(route->upstrJoined, i);
+            eventLog("upstream_join", route->group, upstrIf, 0, NULL);
         } else if (!join && BIT_TST(route->upstrJoined, i)) {
             my_log(LOG_INFO, 0, "Leaving group %s upstream on %s",
                    inetFmt(route->group, s1), upstrIf->Name);
             k_leave(upstrIf, route->group);
             BIT_CLR(route->upstrJoined, i);
+            eventLog("upstream_leave", route->group, upstrIf, 0, NULL);
         }
     }
     // JOINED also when every upstream filtered the group, so we do not
@@ -193,7 +195,8 @@ static void freeHosts(struct VifState *v) {
     v->overflow = false;
 }
 
-static void touchHost(struct VifState *v, uint32_t addr, msec_t expires, msec_t now) {
+// Returns 1 when 'addr' was not tracked before.
+static int touchHost(struct VifState *v, uint32_t addr, msec_t expires, msec_t now) {
     struct Config *conf = getCommonConfig();
     struct HostEntry *h;
 
@@ -201,7 +204,7 @@ static void touchHost(struct VifState *v, uint32_t addr, msec_t expires, msec_t 
         if (h->addr == addr) {
             h->expires = expires;
             h->heard = now;
-            return;
+            return 0;
         }
     }
     if (v->nhosts >= conf->hostLimit) {
@@ -209,12 +212,12 @@ static void touchHost(struct VifState *v, uint32_t addr, msec_t expires, msec_t 
             my_log(LOG_INFO, 0, "Host limit (%u) reached, host tracking disabled for this group/interface",
                    conf->hostLimit);
         v->overflow = true;
-        return;
+        return 0;
     }
     h = (struct HostEntry *)malloc(sizeof(*h));
     if (h == NULL) {
         v->overflow = true;
-        return;
+        return 0;
     }
     h->addr = addr;
     h->expires = expires;
@@ -222,6 +225,7 @@ static void touchHost(struct VifState *v, uint32_t addr, msec_t expires, msec_t 
     h->next = v->hosts;
     v->hosts = h;
     v->nhosts++;
+    return 1;
 }
 
 static void removeHost(struct VifState *v, uint32_t addr) {
@@ -382,22 +386,33 @@ int insertRoute(uint32_t group, int ifx, uint32_t src, int version) {
         v = &r->vif[ifx];
         exp = now + ifGroupMembershipInterval(Dp);
 
-        if (!v->expires)
+        if (!v->expires) {
             my_log(LOG_INFO, 0, "Group %s: start forwarding on %s (report from %s)",
                    inetFmt(group, s1), Dp ? Dp->Name : "?", inetFmt(src, s2));
+            eventLog("forward_start", group, Dp, src, "\"igmp\":%d", version);
+        } else if (v->leftBy) {
+            eventLog("leave_answered", group, Dp, src, "\"igmp\":%d,\"left\":\"%s\"",
+                     version, inetFmt(v->leftBy, s3));
+        }
 
         v->expires = exp;
         v->lmqLeft = 0;          // a report ends the last member query phase
         v->leftBy = 0;
         if (version < 3) {
             // Older Host Present Interval = robustness * QI + QRI
-            if (!v->olderHost || v->olderHost <= now)
+            if (!v->olderHost || v->olderHost <= now) {
                 my_log(LOG_INFO, 0, "Group %s: IGMPv%d host %s on %s, IGMPv2 compatibility",
                        inetFmt(group, s1), version, inetFmt(src, s2), Dp ? Dp->Name : "?");
+                eventLog("compat_v2", group, Dp, src, "\"igmp\":%d", version);
+            }
             v->olderHost = now + ifGroupMembershipInterval(Dp);
         }
-        if (src)
-            touchHost(v, src, exp, now);
+        if (src) {
+            if (touchHost(v, src, exp, now))
+                eventLog("join", group, Dp, src, "\"igmp\":%d,\"hosts\":%u", version, v->nhosts);
+            else if (eventLogReports())
+                eventLog("report", group, Dp, src, "\"igmp\":%d", version);
+        }
         if (version < 3) {
             // IGMPv1/v2 hosts that heard this report suppress their own, so
             // their silence does not mean they left: keep every known host of
@@ -435,8 +450,10 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     if (r == NULL)
         return;
     v = &r->vif[ifx];
-    if (!v->expires && !v->lmqLeft)
+    if (!v->expires && !v->lmqLeft) {
+        eventLog("leave", group, getIfByVifIndex(ifx), src, "\"action\":\"not_forwarded\"");
         return;     // not forwarded there, nothing to do
+    }
 
     Dp = getIfByVifIndex(ifx);
     mode = ifFastLeave(Dp);
@@ -468,9 +485,16 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
             (mode == FASTLEAVE_AUTO &&
              ifQueryVersion(Dp) != 2 && !(v->olderHost > now)));
 
+    eventLog("leave", group, Dp, src,
+             "\"action\":\"%s\",\"others\":%u,\"untracked\":%s,\"mode\":\"%s\",\"compat_v2\":%s,\"check_ms\":%u",
+             drop ? "stopped" : others ? "keeps" : "checking", nothers,
+             v->overflow ? "true" : "false", fastLeaveName(mode),
+             v->olderHost > now ? "true" : "false", drop || others ? 0 : lmqi * lmqc);
+
     if (drop) {
         my_log(LOG_WARNING, 0, "Group %s: stopped on %s, fast leave (last host %s left, mode %s)",
                inetFmt(group, s1), Dp ? Dp->Name : "?", inetFmt(src, s2), fastLeaveName(mode));
+        eventLog("forward_stop", group, Dp, src, "\"reason\":\"fast_leave\"");
         v->expires = 0;
         freeHosts(v);
     } else if (others) {
@@ -619,6 +643,7 @@ msec_t routeTableTick(msec_t now) {
                 if (h->expires <= now) {
                     my_log(LOG_DEBUG, 0, "Group %s: host %s timed out",
                            inetFmt(r->group, s1), inetFmt(h->addr, s2));
+                    eventLog("host_timeout", r->group, getIfByVifIndex(i), h->addr, NULL);
                     *pp = h->next;
                     free(h);
                     v->nhosts--;
@@ -642,12 +667,16 @@ msec_t routeTableTick(msec_t now) {
             // membership timer
             if (v->expires && v->expires <= now) {
                 struct IfDesc *Dp = getIfByVifIndex(i);
-                if (v->leftBy)
+                if (v->leftBy) {
                     my_log(LOG_WARNING, 0, "Group %s: stopped on %s, no member answered after leave from %s",
                            inetFmt(r->group, s1), Dp ? Dp->Name : "?", inetFmt(v->leftBy, s2));
-                else
+                    eventLog("forward_stop", r->group, Dp, v->leftBy, "\"reason\":\"no_answer\"");
+                } else {
                     my_log(LOG_WARNING, 0, "Group %s: stopped on %s, no report for %us (membership timeout)",
                            inetFmt(r->group, s1), Dp ? Dp->Name : "?", ifGroupMembershipInterval(Dp) / 1000);
+                    eventLog("forward_stop", r->group, Dp, 0, "\"reason\":\"timeout\",\"timeout_s\":%u",
+                             ifGroupMembershipInterval(Dp) / 1000);
+                }
                 v->leftBy = 0;
                 v->expires = 0;
                 v->lmqLeft = 0;

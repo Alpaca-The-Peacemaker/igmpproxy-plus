@@ -47,7 +47,7 @@
 static const char Usage[] =
 "Usage: igmpproxy [-h] [-n] [-d] [-v [-v]] <configfile>\n"
 "       igmpproxy -t <configfile>\n"
-"       igmpproxy -S [statussocket]\n"
+"       igmpproxy -S|-E|-Q [statussocket]\n"
 "\n"
 "   -h   Display this help screen\n"
 "   -n   Do not run as a daemon\n"
@@ -55,6 +55,8 @@ static const char Usage[] =
 "   -v   Be verbose. Give twice to see even debug messages.\n"
 "   -t   Check the configuration file and exit.\n"
 "   -S   Print the live group table as JSON (default socket /var/run/igmpproxy.sock).\n"
+"   -E   Print the event log: joins, leaves, timeouts, queries (JSON Lines).\n"
+"   -Q   Send a general query now, so every member reports again.\n"
 "\n"
 PACKAGE_STRING "\n"
 ;
@@ -88,7 +90,7 @@ int main( int ArgCn, char *ArgVc[] ) {
     int c, devnull = -1;
     bool NotAsDaemon = false;
     bool TestConfig = false;
-    bool StatusClient = false;
+    const char *ClientCmd = NULL;
 
     struct Config *config = NULL;
     struct passwd *pw = NULL;
@@ -96,14 +98,20 @@ int main( int ArgCn, char *ArgVc[] ) {
     srand(time(NULL) * getpid());
 
     // Parse the commandline options and setup basic settings..
-    while ((c = getopt(ArgCn, ArgVc, "vdnhtS")) != -1) {
+    while ((c = getopt(ArgCn, ArgVc, "vdnhtSEQ")) != -1) {
         switch (c) {
         case 't':
             TestConfig = true;
             Log2Stderr = true;
             break;
         case 'S':
-            StatusClient = true;
+            ClientCmd = "status";
+            break;
+        case 'E':
+            ClientCmd = "events";
+            break;
+        case 'Q':
+            ClientCmd = "query";
             break;
         case 'n':
             NotAsDaemon = true;
@@ -128,8 +136,8 @@ int main( int ArgCn, char *ArgVc[] ) {
         }
     }
 
-    if (StatusClient) {
-        exit(controlClient(optind < ArgCn ? ArgVc[optind] : "/var/run/igmpproxy.sock"));
+    if (ClientCmd) {
+        exit(controlClient(optind < ArgCn ? ArgVc[optind] : "/var/run/igmpproxy.sock", ClientCmd));
     }
 
     if (optind != ArgCn - 1) {
@@ -297,6 +305,19 @@ int igmpProxyInit(void) {
         }
     }
 
+    // Event log first, so the startup queries are in it too
+    eventLogInit();
+    {
+        struct Config *c = getCommonConfig();
+        eventLog("start", 0, NULL, 0,
+                 "\"version\":\"%s\",\"fastleave\":\"%s\",\"query_version\":%u,"
+                 "\"robustness\":%u,\"query_interval_ms\":%u,\"query_response_interval_ms\":%u,"
+                 "\"last_member_query_interval_ms\":%u,\"last_member_query_count\":%u,"
+                 "\"upstream_leave_delay_ms\":%u",
+                 PACKAGE_VERSION, fastLeaveName(c->fastLeave), c->queryVersion,
+                 c->robustnessValue, c->queryInterval, c->queryResponseInterval,
+                 c->lastMemberQueryInterval, c->lastMemberQueryCount, c->upstreamLeaveDelay);
+    }
     // Initialize IGMP
     initIgmp();
     // Initialize Routing table
@@ -320,6 +341,8 @@ void igmpProxyCleanUp(void) {
     controlCleanUp();       // Remove status socket.
     clearAllRoutes();       // Remove all routes.
     disableMRouter();       // Disable the multirout API
+    eventLog("exit", 0, NULL, 0, NULL);
+    eventLogClose();
 }
 
 /**

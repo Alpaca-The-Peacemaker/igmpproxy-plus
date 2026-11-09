@@ -229,6 +229,23 @@ return view.extend({
 		return E('div', { 'class': 'cbi-map' }, [
 			E('h2', {}, _('IGMP Proxy')),
 			E('div', { 'class': 'cbi-map-descr' }, _('Which devices (IPTV boxes, speakers, computers...) receive which multicast streams from your provider, live.')),
+			E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:.6em;align-items:center;margin-bottom:1em' }, [
+				E('button', {
+					'class': 'cbi-button cbi-button-action',
+					'title': _('Send a query now so every device reports what it receives'),
+					'click': ui.createHandlerFn(this, function(ev) {
+						var note = ev.target.nextElementSibling;
+						return fs.exec('/usr/sbin/igmpproxy', ['-Q']).then(function(res) {
+							note.textContent = res.code === 0
+								? _('Asked all devices; answers arrive within %d s').format(
+									Math.round(((data[0].config || {}).query_response_interval_ms || 10000) / 1000))
+								: _('Could not send the query: %s').format((res.stderr || res.stdout || '').trim());
+						});
+					})
+				}, _('Refresh groups')),
+				E('span', { 'style': 'opacity:.7' }),
+				E('a', { 'href': L.url('admin/services/igmpproxy/events'), 'style': 'margin-left:auto' }, _('Event history'))
+			]),
 			container
 		]);
 	},

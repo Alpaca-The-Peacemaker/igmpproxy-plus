@@ -99,7 +99,14 @@ reboot.
 ### 3. Use it
 
 - **Settings:** LuCI → Services → IGMP Proxy → Settings
-- **Live status:** LuCI → Services → IGMP Proxy → Status, or `igmpproxy -S` over SSH
+- **Live status:** LuCI → Services → IGMP Proxy → Status, or `igmpproxy -S` over SSH.
+  **Refresh groups** asks every device to report what it receives right now (`igmpproxy -Q`).
+- **Event history:** LuCI → Services → IGMP Proxy → Events: every join, leave, stream start
+  and stop (with the reason), timeout and query, with device names. **Download log** gives the
+  complete history as JSON Lines, one event per line, ready for a script or an AI assistant
+  ("here is my IGMP log, why did the stream on 192.168.1.84 stop at 21:04?"). Over SSH:
+  `igmpproxy -E`. Kept in RAM (`/tmp`), about one to two days per MiB; size and location are
+  under Settings → Advanced.
 - **Upgrade later:** `igmpproxy-plus-install` (backs up first, like the first install)
 - **Check versions and the saved backup:** `igmpproxy-plus-install status`
 
@@ -172,6 +179,19 @@ Status page shows **"IGMPv2 host present"** next to channels watched by older (I
 for those, the router sends its checks in IGMPv2 format automatically.
 
 ## Questions
+
+**What does a line in the event log look like?**
+```json
+{"ts":"2026-11-09T21:04:05.123Z","ev":"leave","group":"239.1.1.1","if":"br-lan","host":"192.168.1.84","action":"keeps","others":1,"untracked":false,"mode":"off","compat_v2":true,"check_ms":0}
+```
+`ev` is one of `start`, `join`, `report`, `leave`, `leave_answered`, `forward_start`,
+`forward_stop` (with `reason`: `fast_leave`, `no_answer` or `timeout`), `host_timeout`,
+`compat_v2`, `upstream_join`, `upstream_leave`, `query` and `exit`. Times are UTC.
+
+**A device I did not expect (a robot vacuum, a TV, a speaker) shows up in the list. Why?**
+Many devices join multicast groups for discovery: UPnP/SSDP (239.255.255.250), mDNS (224.0.0.251)
+or a vendor group. They are listed so you can see everything that asked; local discovery groups
+are never requested from your provider, and they cost no internet bandwidth.
 
 **I have several TV boxes on the same channel. Is that a problem?**
 No. igmpproxy-plus tracks every box that asked for a channel and keeps the channel flowing as

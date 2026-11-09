@@ -206,6 +206,11 @@ struct Config {
     unsigned int        queryVersion;
     // Path of the status socket, empty = disabled
     char                controlSocket[108];
+    // Event log (JSON Lines): path (empty = off), rotate size in bytes,
+    // whether periodic reports and queries are logged too
+    char                eventLog[256];
+    unsigned int        eventLogSize;
+    bool                eventLogReports;
     //~ aimwang added
     // Set if nneed to detect new interface.
     unsigned short	rescanVif;
@@ -304,6 +309,7 @@ void routeTableDumpJson(FILE *f, msec_t now);
 void acceptGroupReport(uint32_t src, uint32_t group, int version);
 void acceptLeaveMessage(uint32_t src, uint32_t group);
 void sendGeneralMembershipQuery(void);
+void sendGeneralQueriesNow(const char *why);
 void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group, int forceV2);
 
 /* control.c
@@ -312,7 +318,20 @@ void controlInit(void);
 int  controlFd(void);
 void controlAccept(void);
 void controlCleanUp(void);
-int  controlClient(const char *path);
+int  controlClient(const char *path, const char *cmd);
+
+/* eventlog.c
+ */
+void eventLogInit(void);
+void eventLogClose(void);
+bool eventLogReports(void);
+void eventLog(const char *type, uint32_t group, const struct IfDesc *ifp,
+              uint32_t host, const char *extra, ...)
+#ifdef __GNUC__
+    __attribute__((format(printf, 5, 6)))
+#endif
+    ;
+bool eventLogDump(void (*out)(int, const char *, size_t), int fd);
 extern msec_t startTime;
 
 /* callout.c  (all delays in milliseconds)

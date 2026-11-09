@@ -227,12 +227,16 @@ void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group, int forceV2) {
 
     my_log(LOG_DEBUG, 0, "Sent group specific query for %s on %s. Max resp: %ums",
            inetFmt(group, s1), Dp->Name, lmqi);
+    eventLog("query", group, Dp, 0, "\"kind\":\"group\",\"igmp\":%d,\"max_resp_ms\":%u",
+             (ifQueryVersion(Dp) == 3 && !forceV2) ? 3 : 2, lmqi);
 }
 
 /**
-*   Sends a general membership query on downstream VIFs
+*   Sends a general query on every downstream VIF, without touching the
+*   periodic query timer. 'why' ends up in the event log
+*   ("periodic", "startup", "requested").
 */
-void sendGeneralMembershipQuery(void) {
+static void sendGeneralQueries(const char *why) {
     struct  Config  *conf = getCommonConfig();
     struct  IfDesc  *Dp;
     int             Ix;
@@ -245,8 +249,30 @@ void sendGeneralMembershipQuery(void) {
             my_log(LOG_DEBUG, 0, "Sent membership query from %s ifIndex %d to %s. Max resp: %ums",
                 inetFmt(Dp->InAdr.s_addr,s1), Dp->ifIndex,
                 inetFmt(allhosts_group,s2), conf->queryResponseInterval);
+            if (eventLogReports() || strcmp(why, "periodic"))
+                eventLog("query", 0, Dp, 0, "\"kind\":\"general\",\"igmp\":%u,\"max_resp_ms\":%u,\"why\":\"%s\"",
+                         ifQueryVersion(Dp), conf->queryResponseInterval, why);
         }
     }
+}
+
+/**
+*   "igmpproxy -Q" / refresh button: ask every member to report now. The
+*   periodic schedule is left as it is.
+*/
+void sendGeneralQueriesNow(const char *why) {
+    my_log(LOG_INFO, 0, "General query on all downstream interfaces (%s)", why);
+    sendGeneralQueries(why);
+}
+
+/**
+*   Sends a general membership query on downstream VIFs and schedules the
+*   next one.
+*/
+void sendGeneralMembershipQuery(void) {
+    struct  Config  *conf = getCommonConfig();
+
+    sendGeneralQueries(conf->startupQueryCount > 0 ? "startup" : "periodic");
 
     // Install timer for next general query...
     if(conf->startupQueryCount > 1) {

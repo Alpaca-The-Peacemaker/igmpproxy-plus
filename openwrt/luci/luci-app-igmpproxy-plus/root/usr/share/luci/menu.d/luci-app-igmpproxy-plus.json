@@ -6,8 +6,12 @@
 			"type": "firstchild"
 		},
 		"depends": {
-			"acl": [ "luci-app-igmpproxy-plus" ],
-			"uci": { "igmpproxy": true }
+			"acl": [
+				"luci-app-igmpproxy-plus"
+			],
+			"uci": {
+				"igmpproxy": true
+			}
 		}
 	},
 	"admin/services/igmpproxy/status": {
@@ -18,9 +22,17 @@
 			"path": "igmpproxy/status"
 		}
 	},
+	"admin/services/igmpproxy/events": {
+		"title": "Events",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "igmpproxy/events"
+		}
+	},
 	"admin/services/igmpproxy/settings": {
 		"title": "Settings",
-		"order": 2,
+		"order": 3,
 		"action": {
 			"type": "view",
 			"path": "igmpproxy/settings"
