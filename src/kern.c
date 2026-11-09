@@ -41,6 +41,19 @@ void k_set_rcvbuf(int bufsize, int minsize) {
     int delta = bufsize / 2;
     int iter = 0;
 
+#ifdef SO_RCVBUFFORCE
+    // Linux silently caps SO_RCVBUF at net.core.rmem_max; as root the
+    // forced variant gets the full size. After a restart or a general
+    // query every member answers at once, and a full buffer means lost
+    // reports (and streams that do not start). Memory is only used while
+    // messages are queued.
+    if (setsockopt(MRouterFD, SOL_SOCKET, SO_RCVBUFFORCE,
+                   (char *)&bufsize, sizeof(bufsize)) == 0) {
+        my_log(LOG_DEBUG, 0, "Got %d byte IGMP receive buffer", bufsize);
+        return;
+    }
+#endif
+
     /*
      * Set the socket buffer.  If we can't set it as large as we
      * want, search around to try to find the highest acceptable
@@ -116,7 +129,49 @@ void k_set_if(uint32_t ifa, int ifidx) {
             inetFmt(ifa, s1));
 }
 
-void k_join(struct IfDesc *ifd, uint32_t grp) {
+/**
+*   Linux limits the multicast groups one socket may join
+*   (net.ipv4.igmp_max_memberships, default 20). The proxy joins every
+*   forwarded group upstream on one socket, so with the default the 21st
+*   channel is never requested from the provider. Raise it to 'want' when
+*   lower. Other systems: nothing to do.
+*/
+void k_raise_memberships(unsigned int want) {
+#ifdef __linux__
+    const char *path = "/proc/sys/net/ipv4/igmp_max_memberships";
+    unsigned int cur = 0;
+    FILE *f;
+
+    if (!want || (f = fopen(path, "r")) == NULL)
+        return;
+    if (fscanf(f, "%u", &cur) != 1)
+        cur = 0;
+    fclose(f);
+    if (cur >= want)
+        return;
+    f = fopen(path, "w");
+    if (f != NULL) {
+        int bad = fprintf(f, "%u\n", want) < 0;
+        if (fclose(f) != 0)
+            bad = 1;
+        if (bad)
+            f = NULL;
+    }
+    if (f == NULL) {
+        my_log(LOG_WARNING, errno, "cannot raise %s from %u to %u: at most %u channels can be "
+               "joined upstream", path, cur, want, cur);
+        return;
+    }
+    my_log(LOG_NOTICE, 0, "Raised net.ipv4.igmp_max_memberships from %u to %u", cur, want);
+#else
+    (void)want;
+#endif
+}
+
+/**
+*   Join 'grp' on 'ifd'. Returns 0 or the errno of the failure.
+*/
+int k_join(struct IfDesc *ifd, uint32_t grp) {
 #ifdef HAVE_STRUCT_IP_MREQN
     struct ip_mreqn mreq;
     mreq.imr_address.s_addr = ifd->InAdr.s_addr;
@@ -140,7 +195,9 @@ void k_join(struct IfDesc *ifd, uint32_t grp) {
             my_log(LOG_WARNING, 0, "Check settings of '/sbin/sysctl net.ipv4.igmp_max_memberships'");
 #endif
         }
+        return errno ? errno : EIO;
     }
+    return 0;
 }
 
 void k_leave(struct IfDesc *ifd, uint32_t grp) {

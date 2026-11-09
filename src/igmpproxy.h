@@ -211,6 +211,8 @@ struct Config {
     char                eventLog[256];
     unsigned int        eventLogSize;
     bool                eventLogReports;
+    // raise net.ipv4.igmp_max_memberships to this (Linux), 0 = leave it
+    unsigned int        maxMemberships;
     //~ aimwang added
     // Set if nneed to detect new interface.
     unsigned short	rescanVif;
@@ -292,7 +294,8 @@ void k_hdr_include(int hdrincl);
 void k_set_ttl(int t);
 void k_set_loop(int l);
 void k_set_if(uint32_t ifa, int ifidx);
-void k_join(struct IfDesc *ifd, uint32_t grp);
+int  k_join(struct IfDesc *ifd, uint32_t grp);
+void k_raise_memberships(unsigned int want);
 void k_leave(struct IfDesc *ifd, uint32_t grp);
 
 /* rttable.c

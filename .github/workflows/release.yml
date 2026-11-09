@@ -67,6 +67,8 @@ jobs:
         run: sudo python3 tools/linklocal-test.py "$PWD/src/igmpproxy"
       - name: Event log, refresh query and log rotation
         run: sudo python3 tools/eventlog-test.py "$PWD/src/igmpproxy"
+      - name: Capacity (100 streams, 30 receivers, all reporting at once)
+        run: sudo python3 tools/scale-test.py "$PWD/src/igmpproxy" 100 30 20
 
   installer:
     name: Installer backup and rollback test

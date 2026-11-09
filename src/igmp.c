@@ -57,7 +57,7 @@ void initIgmp(void) {
     send_buf = malloc(RECV_BUF_SIZE);
 
     k_hdr_include(true);    /* include IP header when sending */
-    k_set_rcvbuf(256*1024,48*1024); /* lots of input buffering        */
+    k_set_rcvbuf(2*1024*1024,48*1024); /* bursts of reports after a query */
     k_set_ttl(1);       /* restrict multicasts to one hop */
     k_set_loop(false);      /* disable multicast loopback     */
 

@@ -45,6 +45,8 @@ function describe(e, names) {
 		return _('Joined the stream from the provider');
 	case 'upstream_leave':
 		return _('Left the stream at the provider');
+	case 'upstream_join_failed':
+		return _('Could not request the stream from the provider (%s); retrying').format(e.error);
 	case 'query':
 		if (e.kind == 'group')
 			return _('Asked who still receives this stream (IGMPv%d)').format(e.igmp);
@@ -54,10 +56,10 @@ function describe(e, names) {
 }
 
 var IMPORTANT = { start: 1, exit: 1, join: 1, leave: 1, leave_answered: 1, forward_start: 1,
-	forward_stop: 1, host_timeout: 1, compat_v2: 1, upstream_join: 1, upstream_leave: 1 };
+	forward_stop: 1, host_timeout: 1, compat_v2: 1, upstream_join: 1, upstream_leave: 1, upstream_join_failed: 1 };
 
 function color(e) {
-	if (e.ev == 'forward_stop' || e.ev == 'host_timeout') return '#c0392b';
+	if (e.ev == 'forward_stop' || e.ev == 'host_timeout' || e.ev == 'upstream_join_failed') return '#c0392b';
 	if (e.ev == 'leave') return '#e0a000';
 	if (e.ev == 'join' || e.ev == 'forward_start' || e.ev == 'leave_answered') return '#2e9e44';
 	return '#888';

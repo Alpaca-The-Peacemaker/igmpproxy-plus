@@ -195,6 +195,15 @@ UNIX socket that returns the live group table as JSON, default
 sends a general query through it, so every member reports again.
 .RE
 
+.B maxmemberships
+.I count
+.RS
+Linux only: raise net.ipv4.igmp_max_memberships to at least this at start.
+The proxy joins every forwarded group upstream on one socket, and the
+kernel default of 20 would leave the 21st channel unrequested. Default
+1024, 0 leaves the system setting alone.
+.RE
+
 .B eventlog
 .IR path | off
 .RS

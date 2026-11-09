@@ -305,6 +305,8 @@ int igmpProxyInit(void) {
         }
     }
 
+    // Enough upstream memberships for every channel (Linux default: 20)
+    k_raise_memberships(getCommonConfig()->maxMemberships);
     // Event log first, so the startup queries are in it too
     eventLogInit();
     {

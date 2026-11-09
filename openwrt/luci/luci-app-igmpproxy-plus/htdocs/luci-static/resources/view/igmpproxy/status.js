@@ -14,18 +14,20 @@ var KNOWN = {
 
 var ISSUE_HOURS = 24;
 
+/* exec_direct streams over HTTP: no ubus message size limit (about 1 MB,
+ * reached with a few thousand streams) */
 function fetchStatus() {
-	return fs.exec('/usr/sbin/igmpproxy', ['-S']).then(function(res) {
-		if (res.code !== 0)
-			return { error: (res.stderr || '').trim() || _('IGMP proxy is not running') };
+	return fs.exec_direct('/usr/sbin/igmpproxy', ['-S'], 'text').then(function(out) {
+		if (!out || out.charAt(0) != '{')
+			return { error: (out || '').trim() || _('IGMP proxy is not running') };
 		try {
-			return JSON.parse(res.stdout);
+			return JSON.parse(out);
 		}
 		catch (e) {
 			return { error: _('Invalid status data: %s').format(e.message) };
 		}
 	}).catch(function(e) {
-		return { error: e.message };
+		return { error: e.message || _('IGMP proxy is not running') };
 	});
 }
 
@@ -165,6 +167,9 @@ function render(st, names, channels, rate, issues) {
 			_('Fast leave: %s · IGMPv%d queries · up %s').format(c.fastleave, c.query_version || 2, dur(st.uptime_ms)))
 	]);
 
+	var joinFail = st.upstream_join_failures ? E('div', { 'class': 'alert-message danger', 'style': 'margin-bottom:1em' },
+		_('%d upstream join(s) were refused by the system since the proxy started: those streams were not requested from the provider. See the Events page and the system log.').format(st.upstream_join_failures)) : '';
+
 	var issueLine = '';
 	if (issues && issues.length)
 		issueLine = E('div', { 'class': 'alert-message warning', 'style': 'margin-bottom:1em' }, [
@@ -219,6 +224,7 @@ function render(st, names, channels, rate, issues) {
 
 	return E('div', {}, [
 		summary,
+		joinFail,
 		issueLine,
 		E('h3', {}, _('Devices')),
 		table([_('Device'), _('Streams'), _('Bandwidth'), _('IGMP')], watchRows, _('No device is receiving a stream right now')),

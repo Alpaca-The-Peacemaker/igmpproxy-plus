@@ -172,6 +172,16 @@ return baseclass.extend({
 			}
 		});
 
+		var refused = {};
+		ev.forEach(function(e) {
+			if (e.ev == 'upstream_join_failed')
+				refused[e.group] = e;
+		});
+		Object.keys(refused).forEach(function(g) {
+			issues.push({ level: 'warn', ts: refused[g].ts, text:
+				_('%s could not be requested from the provider (%s)').format(self.channelText(g, channels), refused[g].error) });
+		});
+
 		var starts = ev.filter(function(e) { return e.ev == 'start'; });
 		if (starts.length > 1)
 			issues.push({ level: 'info', ts: starts[starts.length - 1].ts, text:

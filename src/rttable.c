@@ -92,6 +92,7 @@ struct RouteTable {
 
     msec_t              created;
     msec_t              leaveAt;    // pending upstream leave / removal, 0 = none
+    msec_t              joinRetryAt; // an upstream join failed: retry then
     unsigned long       reports;
     unsigned long       leaves;
 
@@ -100,6 +101,10 @@ struct RouteTable {
 
 // Keeper for the routing table...
 static struct RouteTable   *routing_table;
+
+// Upstream joins refused by the kernel since start (status JSON)
+static unsigned long upstreamJoinFailures;
+#define JOIN_RETRY_MS 10000
 
 static void logRouteTable(const char *header);
 static int internUpdateKernelRoute(struct RouteTable *route, int activate);
@@ -132,7 +137,7 @@ void initRouteTable(void) {
 */
 static void sendJoinLeaveUpstream(struct RouteTable* route, int join) {
     struct IfDesc*      upstrIf;
-    int i;
+    int i, failed = 0;
 
     for(i=0; i<MAX_UPS_VIFS && upStreamIfIdx[i] != -1; i++) {
         upstrIf = getIfByIx( upStreamIfIdx[i] );
@@ -163,11 +168,18 @@ static void sendJoinLeaveUpstream(struct RouteTable* route, int join) {
         }
 
         if(join && !BIT_TST(route->upstrJoined, i)) {
+            int err;
             my_log(LOG_INFO, 0, "Joining group %s upstream on %s",
                    inetFmt(route->group, s1), upstrIf->Name);
-            k_join(upstrIf, route->group);
-            BIT_SET(route->upstrJoined, i);
-            eventLog("upstream_join", route->group, upstrIf, 0, NULL);
+            if ((err = k_join(upstrIf, route->group)) == 0) {
+                BIT_SET(route->upstrJoined, i);
+                eventLog("upstream_join", route->group, upstrIf, 0, NULL);
+            } else {
+                failed = 1;
+                upstreamJoinFailures++;
+                eventLog("upstream_join_failed", route->group, upstrIf, 0,
+                         "\"error\":\"%s\",\"retry_ms\":%u", strerror(err), JOIN_RETRY_MS);
+            }
         } else if (!join && BIT_TST(route->upstrJoined, i)) {
             my_log(LOG_INFO, 0, "Leaving group %s upstream on %s",
                    inetFmt(route->group, s1), upstrIf->Name);
@@ -177,8 +189,9 @@ static void sendJoinLeaveUpstream(struct RouteTable* route, int join) {
         }
     }
     // JOINED also when every upstream filtered the group, so we do not
-    // retry the join on every tick.
-    route->upstrState = join ? ROUTESTATE_JOINED : ROUTESTATE_NOTJOINED;
+    // retry the join on every tick. A refused join is retried later.
+    route->upstrState = (join && !failed) ? ROUTESTATE_JOINED : ROUTESTATE_NOTJOINED;
+    route->joinRetryAt = (join && failed) ? now_ms() + JOIN_RETRY_MS : 0;
 }
 
 /*
@@ -270,10 +283,11 @@ static void syncRoute(struct RouteTable *r, msec_t now) {
 
     if (bits) {
         r->leaveAt = 0;
-        if (r->upstrState != ROUTESTATE_JOINED)
+        if (r->upstrState != ROUTESTATE_JOINED && r->joinRetryAt <= now)
             sendJoinLeaveUpstream(r, 1);
     } else if (r->leaveAt == 0) {
-        if (r->upstrState == ROUTESTATE_JOINED)
+        r->joinRetryAt = 0;
+        if (r->upstrState == ROUTESTATE_JOINED || r->upstrJoined)
             r->leaveAt = now + conf->upstreamLeaveDelay;
         else
             // Data-only route without listeners: keep the empty kernel
@@ -297,7 +311,7 @@ void clearAllRoutes(void) {
         my_log(LOG_DEBUG, 0, "Removing route entry for %s", inetFmt(croute->group, s1));
 
         internUpdateKernelRoute(croute, 0);
-        if (croute->upstrState == ROUTESTATE_JOINED)
+        if (croute->upstrState == ROUTESTATE_JOINED || croute->upstrJoined)
             sendJoinLeaveUpstream(croute, 0);
 
         for (i = 0; i < MAXVIFS; i++)
@@ -594,7 +608,7 @@ static void removeRoute(struct RouteTable*  croute) {
 
     internUpdateKernelRoute(croute, 0);
 
-    if (croute->upstrState == ROUTESTATE_JOINED)
+    if (croute->upstrState == ROUTESTATE_JOINED || croute->upstrJoined)
         sendJoinLeaveUpstream(croute, 0);
 
     if(croute->prevroute == NULL) {
@@ -691,8 +705,10 @@ msec_t routeTableTick(msec_t now) {
 
         if (r->leaveAt && r->leaveAt <= now)
             removeRoute(r);
-        else
+        else {
             minDeadline(&next, r->leaveAt);
+            minDeadline(&next, r->joinRetryAt);
+        }
     }
     return next;
 }
@@ -782,8 +798,9 @@ void routeTableDumpJson(FILE *f, msec_t now) {
     int i, first;
     char buf[32];
 
-    fprintf(f, "{\"daemon\":\"igmpproxy-plus\",\"version\":\"%s\",\"uptime_ms\":%llu,",
-            PACKAGE_VERSION, (unsigned long long)(now - startTime));
+    fprintf(f, "{\"daemon\":\"igmpproxy-plus\",\"version\":\"%s\",\"uptime_ms\":%llu,"
+               "\"upstream_join_failures\":%lu,",
+            PACKAGE_VERSION, (unsigned long long)(now - startTime), upstreamJoinFailures);
 
     fprintf(f, "\"config\":{\"robustness\":%u,\"query_interval_ms\":%u,"
                "\"query_response_interval_ms\":%u,\"startup_query_interval_ms\":%u,"

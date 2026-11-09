@@ -116,6 +116,7 @@ static void initCommonConfig(void) {
     commonConfig.eventLog[0] = '\0';
     commonConfig.eventLogSize = 1024 * 1024;
     commonConfig.eventLogReports = true;
+    commonConfig.maxMemberships = 1024;
 
     // aimwang: default value
     commonConfig.defaultInterfaceState = IF_STATE_DISABLED;
@@ -373,6 +374,9 @@ int loadConfig(char *configFile) {
         else if(strcmp("eventlogsize", token)==0) {
             // KiB; 0 = never rotate
             commonConfig.eventLogSize = parseUInt(key, needValue(key), 0, 1024 * 1024) * 1024;
+        }
+        else if(strcmp("maxmemberships", token)==0) {
+            commonConfig.maxMemberships = parseUInt(key, needValue(key), 0, 65535);
         }
         else if(strcmp("eventlogreports", token)==0) {
             token = needValue("eventlogreports");

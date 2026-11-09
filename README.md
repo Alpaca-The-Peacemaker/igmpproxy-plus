@@ -189,6 +189,19 @@ for those, the router sends its checks in IGMPv2 format automatically.
 
 ## Questions
 
+**How many streams and devices can it handle?**
+Plenty for a home with several TVs or a small office or event: every release build checks 100
+streams and 30 receivers that all report at once (`tools/scale-test.py`). As a stress test it
+also handled 500 streams and 100 receivers (about 1000 memberships arriving within 10 ms): all
+500 streams flowing 0.3 s later, every leave stopped its stream in 2.0 s (with 2 × 1000 ms
+checks) while the others kept flowing, 0.4 % CPU and 3 MB of memory. On Linux it raises
+`net.ipv4.igmp_max_memberships` (default 20) to 1024 at start; before 1.4.1 only 20 channels
+could be requested from the provider at the same time (option `maxmemberships`). It is a proxy: streams
+come from the upstream side to the downstream networks. Sending streams between your own VLANs
+(AV-over-IP encoders and decoders) needs PIM routing or IGMP snooping switches instead.
+With hundreds of streams, turn off "Log periodic reports and queries" so the event log covers
+more than a few hours.
+
 **What does a line in the event log look like?**
 ```json
 {"ts":"2026-11-09T21:04:05.123Z","ev":"leave","group":"239.1.1.1","if":"br-lan","host":"192.168.1.84","action":"keeps","others":1,"untracked":false,"mode":"off","compat_v2":true,"check_ms":0}
