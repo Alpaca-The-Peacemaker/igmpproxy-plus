@@ -161,7 +161,7 @@ function render(st, names, channels, rate, issues) {
 	var summary = E('div', { 'class': 'cbi-section', 'style': 'padding:.8em 1em;font-size:110%' }, [
 		dot('#2e9e44'), E('strong', {}, _('Running')), ' · ',
 		_('%d device(s) receiving %d stream(s)').format(hosts.length, tv.length),
-		tv.length ? [' · ', E('strong', {}, common.mbps(measured ? total : null)), ' ', _('from the provider')] : '',
+		tv.length ? E('span', {}, [' · ', E('strong', {}, common.mbps(measured ? total : null)), ' ', _('from the provider')]) : '',
 		' · ', _('streams stop %s').format(stopAfter),
 		E('div', { 'style': 'font-size:85%;opacity:.7;margin-top:.3em' },
 			_('Fast leave: %s · IGMPv%d queries · up %s').format(c.fastleave, c.query_version || 2, dur(st.uptime_ms)))
