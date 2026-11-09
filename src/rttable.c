@@ -427,7 +427,7 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     unsigned int lmqi, lmqc;
     int mode;
     bool drop, others;
-    unsigned int nrecent = 0;
+    unsigned int nothers = 0;
 
     if (ifx < 0 || ifx >= MAXVIFS || ifx >= 32)
         return;
@@ -446,33 +446,27 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
     removeHost(v, src);
     r->leaves++;
 
-    // Other hosts that reported this group on this interface themselves
-    // within the last query cycle and have not left: the group keeps flowing
-    // for them, whatever the mode, even if they are slow to answer (or
-    // ignore) the group specific query. A host only kept alive by others'
-    // reports (IGMPv2 suppression) and not heard for a whole cycle may be
-    // gone (e.g. powered off): it does not block the leave; if it is still
-    // there it answers the group specific query below.
+    // Any other host still tracked on this interface keeps the group
+    // flowing, whatever the mode. A host that only stays alive through
+    // others' reports (IGMPv2 suppression) never answers for itself, so how
+    // long ago it was heard says nothing about whether it is still watching:
+    // it is kept until the membership timeout. Retaining a possibly
+    // powered-off member is the price of never cutting a silent receiver.
     {
-        struct Config *conf = getCommonConfig();
-        msec_t cycle = (msec_t)conf->queryInterval + conf->queryResponseInterval + 2000;
         struct HostEntry *h;
-        unsigned int recent = 0;
         for (h = v->hosts; h; h = h->next)
-            if (h->heard + cycle > now)
-                recent++;
-        others = recent > 0;
-        nrecent = recent;
+            nothers++;
+        others = nothers > 0;
     }
 
-    // With IGMPv3 queries, an IGMPv1/v2 host on the interface means hosts
-    // may suppress each other's reports and the host list may be
-    // incomplete: auto then behaves like off. With "queryversion 2" the
-    // admin opted into v2 (e.g. behind IGMP snooping) and the list is trusted.
-    drop = !others && v->hosts == NULL && !v->overflow &&
+    // Auto fast leave is instant only when the host list can be complete:
+    // IGMPv3 queries and no IGMPv1/v2 host present. With IGMPv2 (queried or
+    // compatibility mode) hosts suppress each other's reports, so the list
+    // may miss members and auto behaves like off (group specific queries).
+    drop = !others && !v->overflow &&
            ((mode == FASTLEAVE_ON) ||
             (mode == FASTLEAVE_AUTO &&
-             (ifQueryVersion(Dp) == 2 || !(v->olderHost > now))));
+             ifQueryVersion(Dp) != 2 && !(v->olderHost > now)));
 
     if (drop) {
         my_log(LOG_WARNING, 0, "Group %s: stopped on %s, fast leave (last host %s left, mode %s)",
@@ -481,7 +475,7 @@ void routeLeave(uint32_t group, int ifx, uint32_t src) {
         freeHosts(v);
     } else if (others) {
         my_log(LOG_INFO, 0, "Group %s: leave from %s on %s, still watched by %u other host(s), keeps flowing",
-               inetFmt(group, s1), inetFmt(src, s2), Dp ? Dp->Name : "?", nrecent);
+               inetFmt(group, s1), inetFmt(src, s2), Dp ? Dp->Name : "?", nothers);
     } else {
         msec_t lmqt = now + (msec_t)lmqi * lmqc;
         my_log(LOG_INFO, 0, "Group %s: leave from %s on %s, checking for other members (%ux%ums)",

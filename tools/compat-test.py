@@ -26,12 +26,13 @@ from nstest import GROUP, PORT, RECV, SENDER, Proc, ns, pkt_times, setup, teardo
 SOCK = "/var/run/igmpproxy.sock"
 
 
-def scenario(binary, qv, mode, hosts, leaver, silent=(), lost=(), extra="", hold=3):
+def scenario(binary, qv, mode, hosts, leaver, silent=(), lost=(), extra="", hold=3, post=5):
     """hosts: {1: ver, ...}; leaver: receiver that leaves (or None);
     silent: receivers that never see IGMP queries, so never answer them;
     lost: receivers that go mute right after joining, like a box that loses
     power without sending a leave; extra: global config lines;
-    hold: seconds to wait between the joins and the leave."""
+    hold: seconds to wait between the joins and the leave;
+    post: seconds to watch after the leave."""
     tmp = tempfile.mkdtemp(prefix="compat-")
     conf = os.path.join(tmp, "igmpproxy.conf")
     with open(conf, "w") as f:
@@ -74,7 +75,7 @@ def scenario(binary, qv, mode, hosts, leaver, silent=(), lost=(), extra="", hold
             res[f"rx{i}_receives"] = len(got) > 20
         if leaver:
             os.killpg(rx[leaver].p.pid, signal.SIGUSR1)
-        time.sleep(5)
+        time.sleep(post)
         t_end = time.time() - 0.3      # allow for tcpdump line buffering
         if leaver:
             after = [t for t in pkt_times(dumps[leaver]) if t > t_leave]
@@ -83,9 +84,13 @@ def scenario(binary, qv, mode, hosts, leaver, silent=(), lost=(), extra="", hold
             for i in hosts:
                 if i != leaver:
                     ts = [t for t in pkt_times(dumps[i]) if t > t_leave - 1]
+                    if ts:
+                        res["stayer_last_s"] = round(ts[-1] - t_leave, 2)
+                    # judge continuity over the first 5 s after the leave
+                    ts = [t for t in ts if t <= t_leave + 5]
                     # include the silence after the last packet: a stream that
                     # stops completely must count as a gap
-                    gaps = [b - a for a, b in zip(ts, ts[1:])] + ([t_end - ts[-1]] if ts else [])
+                    gaps = [b - a for a, b in zip(ts, ts[1:])] + ([min(t_end, t_leave + 5) - ts[-1]] if ts else [])
                     g = round(max(gaps), 2) if gaps else 99.0
                     worst = g if worst is None else max(worst, g)
             if worst is not None:
@@ -110,11 +115,19 @@ CASES = [
     ("v2 + silent v2 stays",  {1: 2, 2: 2},         1,      (2,)),
 ]
 
-# A box that lost power (stops reporting, sends no leave) must not keep the
-# stream alive once the last real viewer leaves. Short query timers so a
-# whole query cycle passes during the test.
+# Short query timers, so whole query cycles pass during the test.
 SHORT = "queryinterval 4s\nqueryresponseinterval 1s\n"
-LOST_CASE = ("v2 lost power, other leaves", {1: 2, 2: 2}, 1, (), (2,), SHORT, 9)
+# Two IGMPv2 boxes for longer than a query cycle: report suppression lets one
+# box stay quiet for whole cycles. The quiet one must keep its stream.
+LONG_CASE = ("2x v2 long, one leaves", {1: 2, 2: 2}, 2, (), (), SHORT, 12, 5)
+# A box that goes mute after joining (suppressed by the other box's reports,
+# or powered off: the router cannot tell). When the other box leaves, the
+# mute one keeps its stream until the membership timeout
+# (robustness 3 x 4 s + 1 s = 13 s after the last report it was credited
+# with), never cut at the leave.
+MUTED_CASE = ("v2 muted stays, other leaves", {1: 2, 2: 2}, 1, (), (2,),
+              SHORT + "robustness 3\n", 12, 17)
+GMI_S = 13
 
 
 def expect(qv, mode, name, hosts, leaver, r):
@@ -122,9 +135,12 @@ def expect(qv, mode, name, hosts, leaver, r):
     for i in hosts:
         if not r.get(f"rx{i}_receives"):
             problems.append(f"rx{i} (IGMPv{hosts[i]}) got no stream")
-    if r.get("_lost"):
-        if r.get("stop_s") is None or r["stop_s"] > 3.5:
-            problems.append(f"stream kept by a box that lost power ({r.get('stop_s')} s after the last viewer left)")
+    if r.get("_muted"):
+        last = r.get("stayer_last_s")
+        if r.get("stayer_gap_s") is None or r["stayer_gap_s"] > 0.2:
+            problems.append(f"mute box lost the stream at the leave (gap {r.get('stayer_gap_s')} s)")
+        elif last is None or last > GMI_S + 2:
+            problems.append(f"mute box kept the stream past the membership timeout ({last} s)")
         return problems
     if leaver:
         if r.get("stop_s") is None or r["stop_s"] > 3.0:
@@ -144,17 +160,15 @@ def main():
     print(f"{'query':6} {'mode':5} {'case':20} {'compat':7} {'stop':>6} {'stayer gap':>10}  result")
     for qv in (3, 2):
         for mode in ("off", "on", "auto"):
-            for case in CASES + [LOST_CASE]:
+            for case in CASES + [LONG_CASE, MUTED_CASE]:
                 name, hosts, leaver, silent = case[:4]
-                lost, extra, hold = case[4:] if len(case) > 4 else ((), "", 3)
+                lost, extra, hold, post = case[4:] if len(case) > 4 else ((), "", 3, 5)
                 only = os.environ.get("COMPAT_ONLY")
                 if only and only not in name:
                     continue
-                r = scenario(binary, qv, mode, hosts, leaver, silent, lost, extra, hold)
+                r = scenario(binary, qv, mode, hosts, leaver, silent, lost, extra, hold, post)
                 if lost:
-                    # the lost box's own stream does not matter; it must stop quickly
-                    r.pop("stayer_gap_s", None)
-                    r["_lost"] = True
+                    r["_muted"] = True
                 probs = expect(qv, mode, name, hosts, leaver, r)
                 failed += bool(probs)
                 print(f"v{qv:<5} {mode:5} {name:20} {str(r.get('compat')):7} "

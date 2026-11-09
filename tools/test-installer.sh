@@ -37,7 +37,7 @@ add)
 		case "$f" in /*) [ -f /var/mockwrt/fail_install ] && { echo "mock: install error" >&2; exit 1; } ;; esac
 		case "$f" in
 		/*) set -- $(cat "$f"); echo "$2" > "$P/$1"; echo "config igmpproxy 'package-default'" > /etc/config/igmpproxy.apk-new ;;
-		*) echo "0.4-r1" > "$P/$f" ;;
+		*) [ -f /var/mockwrt/fail_stock ] && { echo "mock: no network" >&2; exit 1; }; echo "0.4-r1" > "$P/$f" ;;
 		esac
 	done ;;
 esac
@@ -170,6 +170,31 @@ run rollback
 rm -f "$MOCK/fail_download"
 check "exit code" "$(cat "$MOCK/rc")" 1
 check "says incomplete" "$(grep -c INCOMPLETE "$MOCK/out")" 1
+
+echo "10. rollback whose restored version does not start reports failure"
+setup
+echo "1.0.1-r1" > "$MOCK/pkgs/igmpproxy-plus"
+run
+echo "1.0.1-r1" > "$MOCK/broken_version"   # the old release no longer starts
+touch "$MOCK/fail_restart"
+run rollback
+rm -f "$MOCK/fail_restart" "$MOCK/broken_version"
+check "exit code" "$(cat "$MOCK/rc")" 1
+check "says incomplete" "$(grep -c INCOMPLETE "$MOCK/out")" 1
+check "does not claim done" "$(grep -c "rollback done" "$MOCK/out")" 0
+check "old version installed" "$(ver igmpproxy-plus)" "1.0.1-r1"
+
+echo "11. rollback to stock that cannot be reinstalled restores the config and reports failure"
+setup
+echo "0.4-r1" > "$MOCK/pkgs/igmpproxy"
+run
+echo "config igmpproxy 'changed-later'" > /etc/config/igmpproxy
+touch "$MOCK/fail_stock"
+run rollback
+rm -f "$MOCK/fail_stock"
+check "exit code" "$(cat "$MOCK/rc")" 1
+check "says incomplete" "$(grep -c INCOMPLETE "$MOCK/out")" 1
+check "config restored" "$(cat /etc/config/igmpproxy)" "config igmpproxy 'user-config'"
 
 echo
 if [ "$FAILS" = 0 ]; then echo "all installer tests passed"; else echo "$FAILS installer checks failed"; exit 1; fi

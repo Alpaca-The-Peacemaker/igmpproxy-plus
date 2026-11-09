@@ -94,17 +94,23 @@ function table(headers, rows, empty) {
 	return t;
 }
 
-/* Plain-language state of one channel on the LAN. */
+/* Plain-language state of one stream, over all downstream interfaces:
+ * the most active member decides (streaming > checking > stopped). */
 function channelState(g) {
 	if (!g.members.length)
 		return [dot('#999'), _('no receivers')];
-	var m = g.members[0];
-	if (!m.forwarding)
+	var fwd = g.members.filter(function(m) { return m.forwarding; });
+	if (!fwd.length)
 		return [dot('#999'), _('stopped, waiting for a device to answer')];
 	if (g.leave_in_ms >= 0)
 		return [dot('#e0a000'), _('stopping in %s').format(secs(g.leave_in_ms))];
-	if (m.last_member_queries_left > 0 || m.expires_in_ms < 5000)
-		return [dot('#e0a000'), _('a device left, checking for others (%s)').format(secs(m.expires_in_ms))];
+	var steady = fwd.filter(function(m) {
+		return !(m.last_member_queries_left > 0) && m.expires_in_ms >= 5000;
+	});
+	if (!steady.length) {
+		var t = Math.max.apply(null, fwd.map(function(m) { return m.expires_in_ms; }));
+		return [dot('#e0a000'), _('a device left, checking for others (%s)').format(secs(t))];
+	}
 	return [dot('#2e9e44'), _('streaming')];
 }
 
@@ -214,8 +220,9 @@ return view.extend({
 				var d = c.querySelector('details');
 				var open = d && d.open;
 				c.replaceChildren(render(st, names));
-				if (open)
-					c.querySelector('details').open = true;
+				var nd = c.querySelector('details');
+				if (open && nd)
+					nd.open = true;
 			});
 		}, 2);
 

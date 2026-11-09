@@ -38,6 +38,25 @@ PLUGIN_PKG=os-igmp-proxy-plus.pkg
 installed() { pkg info -e "$1" 2>/dev/null; }
 version() { pkg query '%v' "$1" 2>/dev/null || true; }
 running() { pgrep -qx igmpproxy-plus; }
+stock_running() { pgrep -qx igmpproxy; }
+
+# wait up to 10 s for <check> to succeed
+wait_for() {
+	i=0
+	until "$1"; do
+		i=$((i + 1))
+		[ "$i" -ge 10 ] && return 1
+		sleep 1
+	done
+}
+
+was_running() { [ "$(cat "$BACKUP/was_running" 2>/dev/null)" = 1 ]; }
+
+# roll back after a failed install; always exits non-zero
+rollback_and_exit() {
+	do_rollback || true
+	exit 1
+}
 
 fetch_pkg() {
 	mkdir -p "$TMP"
@@ -51,8 +70,10 @@ stop_stock() {
 }
 
 start_plus() {
-	/usr/local/sbin/configctl template reload OPNsense/IGMPProxyPlus >/dev/null 2>&1 || true
-	/usr/local/sbin/configctl igmpproxyplus restart >/dev/null 2>&1 || true
+	ok=0
+	/usr/local/sbin/configctl template reload OPNsense/IGMPProxyPlus >/dev/null 2>&1 || { say "template reload failed"; ok=1; }
+	/usr/local/sbin/configctl igmpproxyplus restart >/dev/null 2>&1 || { say "service restart failed"; ok=1; }
+	return $ok
 }
 
 # --- backup -------------------------------------------------------------------
@@ -66,6 +87,7 @@ save_backup() {
 		true
 	} > "$BACKUP/previous"
 	[ -s "$BACKUP/previous" ] || echo "none" > "$BACKUP/previous"
+	if running || stock_running; then echo 1 > "$BACKUP/was_running"; else echo 0 > "$BACKUP/was_running"; fi
 	date > "$BACKUP/date"
 	if [ -f "$0" ] && [ "$0" != "$SELF" ]; then
 		cp "$0" "$SELF" && chmod 755 "$SELF"
@@ -79,26 +101,50 @@ do_rollback() {
 	[ -f "$BACKUP/previous" ] || die "no backup found in $BACKUP"
 	set -- $(head -n1 "$BACKUP/previous")
 	kind=$1
+	want=${2:-}
+	INCOMPLETE=0
 	say "rolling back to: $* (backup from $(cat "$BACKUP/date" 2>/dev/null))"
 
 	case "$kind" in
 	plus)
-		tag=v${2%%_*}          # 1.2.2_1 -> v1.2.2
+		tag=v${want%%_*}       # 1.2.2_1 -> v1.2.2
 		if fetch_pkg "$RELEASES/download/$tag" "$DAEMON_PKG" && fetch_pkg "$RELEASES/download/$tag" "$PLUGIN_PKG"; then
-			pkg add -f "$TMP/$DAEMON_PKG" && pkg add -f "$TMP/$PLUGIN_PKG"
+			if ! { pkg add -f "$TMP/$DAEMON_PKG" && pkg add -f "$TMP/$PLUGIN_PKG"; }; then
+				say "could not reinstall release $tag"
+				INCOMPLETE=1
+			fi
 		else
-			say "release $tag is not on GitHub, keeping the installed version"
+			say "could not download release $tag: the installed version stays"
+			INCOMPLETE=1
 		fi
-		start_plus
+		now=$(version igmpproxy-plus)
+		if [ "${now%%_*}" != "${want%%_*}" ]; then
+			say "expected igmpproxy-plus $want, installed: ${now:-nothing}"
+			INCOMPLETE=1
+		fi
+		start_plus || INCOMPLETE=1
+		if was_running && ! wait_for running; then
+			say "IGMP Proxy Plus was running before but is not running now"
+			INCOMPLETE=1
+		fi
 		;;
 	stock|none)
 		pkill -x igmpproxy-plus 2>/dev/null || true
-		installed os-igmp-proxy-plus && pkg delete -y os-igmp-proxy-plus
-		installed igmpproxy-plus && pkg delete -y igmpproxy-plus
+		installed os-igmp-proxy-plus && { pkg delete -y os-igmp-proxy-plus || INCOMPLETE=1; }
+		installed igmpproxy-plus && { pkg delete -y igmpproxy-plus || INCOMPLETE=1; }
+		installed igmpproxy-plus && { say "igmpproxy-plus is still installed"; INCOMPLETE=1; }
 		if [ "$kind" = stock ]; then
-			pkg install -y os-igmp-proxy || die "could not reinstall os-igmp-proxy (no internet?). Install it from System > Firmware > Plugins."
-			/usr/local/etc/rc.configure_plugins POST_INSTALL >/dev/null 2>&1 || true
-			/usr/local/sbin/pluginctl -s igmpproxy restart >/dev/null 2>&1 || true
+			if pkg install -y os-igmp-proxy; then
+				/usr/local/etc/rc.configure_plugins POST_INSTALL >/dev/null 2>&1 || true
+				/usr/local/sbin/pluginctl -s igmpproxy restart >/dev/null 2>&1 || say "restarting the stock igmpproxy failed"
+				if was_running && ! wait_for stock_running; then
+					say "the stock igmpproxy is installed but not running. Check Services > IGMP Proxy"
+					INCOMPLETE=1
+				fi
+			else
+				say "could not reinstall os-igmp-proxy (no internet?). Install it from System > Firmware > Plugins."
+				INCOMPLETE=1
+			fi
 		fi
 		;;
 	*)
@@ -106,6 +152,10 @@ do_rollback() {
 		;;
 	esac
 	rm -rf "$TMP"
+	if [ "$INCOMPLETE" = 1 ]; then
+		say "rollback INCOMPLETE, see the messages above. The full configuration from before is in $BACKUP/config.xml"
+		return 1
+	fi
 	say "rollback done. The full configuration from before is also in $BACKUP/config.xml"
 }
 
@@ -129,24 +179,22 @@ do_install() {
 	fi
 
 	say "installing"
-	if ! { pkg add -f "$TMP/$DAEMON_PKG" && pkg add -f "$TMP/$PLUGIN_PKG"; }; then
+	if ! { pkg add -f "$TMP/$DAEMON_PKG" && pkg add -f "$TMP/$PLUGIN_PKG"; } || ! installed igmpproxy-plus; then
 		say "installation failed, rolling back"
-		do_rollback
-		exit 1
+		rollback_and_exit
 	fi
 
 	if [ "$FIRST" = 1 ]; then
 		/usr/local/bin/php "$IMPORT" || say "could not import the stock settings, configure Services > IGMP Proxy Plus by hand"
 	fi
-	start_plus
+	act=0
+	start_plus || act=1
 
 	if grep -q '<igmpproxyplus>' /conf/config.xml && \
 	   sed -n '/<igmpproxyplus>/,/<\/igmpproxyplus>/p' /conf/config.xml | grep -q '<enabled>1</enabled>'; then
-		sleep 2
-		if ! running; then
+		if [ "$act" = 1 ] || ! wait_for running; then
 			say "IGMP Proxy Plus did not start, rolling back. Log: clog /var/log/system/latest.log | grep igmpproxy"
-			do_rollback
-			exit 1
+			rollback_and_exit
 		fi
 		say "running. Settings and status: Services > IGMP Proxy Plus"
 	else
@@ -161,7 +209,7 @@ do_uninstall() {
 	installed os-igmp-proxy-plus || installed igmpproxy-plus || die "IGMP Proxy Plus is not installed"
 	save_backup
 	echo "stock" > "$BACKUP/previous"
-	do_rollback
+	do_rollback || exit 1
 	say "back on the stock IGMP Proxy plugin"
 }
 

@@ -74,6 +74,32 @@ pkg_add_stock() {
 
 running() { /etc/init.d/igmpproxy running >/dev/null 2>&1; }
 
+# enable at boot and (re)start; fails if either step fails
+activate() {
+	ok=0
+	/etc/init.d/igmpproxy enable || { say "enabling the service failed"; ok=1; }
+	/etc/init.d/igmpproxy restart || { say "restarting the service failed"; ok=1; }
+	return $ok
+}
+
+# wait up to 10 s for the service to run
+wait_running() {
+	i=0
+	until running; do
+		i=$((i + 1))
+		[ "$i" -ge 10 ] && return 1
+		sleep 1
+	done
+}
+
+was_running() { [ "$(cat "$BACKUP/was_running" 2>/dev/null)" = 1 ]; }
+
+# roll back after a failed install; always exits non-zero
+rollback_and_exit() {
+	do_rollback || true
+	exit 1
+}
+
 # download <base-url> <file>
 fetch() {
 	mkdir -p "$TMP"
@@ -130,7 +156,10 @@ do_rollback() {
 	stock)
 		installed luci-app-igmpproxy-plus && pkg_del luci-app-igmpproxy-plus
 		installed igmpproxy-plus && pkg_del igmpproxy-plus
-		pkg_add_stock || die "could not reinstall stock igmpproxy (no internet?). Try: $([ "$PM" = apk ] && echo "apk add" || echo "opkg install") igmpproxy"
+		if ! pkg_add_stock; then
+			say "could not reinstall stock igmpproxy (no internet?). Try: $([ "$PM" = apk ] && echo "apk add" || echo "opkg install") igmpproxy"
+			INCOMPLETE=1
+		fi
 		;;
 	plus)
 		tag=v${ver%-*}         # 1.2.1-r1 (apk) or 1.2.1-1 (opkg) -> v1.2.1
@@ -146,6 +175,7 @@ do_rollback() {
 	none)
 		installed luci-app-igmpproxy-plus && pkg_del luci-app-igmpproxy-plus
 		installed igmpproxy-plus && pkg_del igmpproxy-plus
+		/etc/init.d/igmpproxy stop >/dev/null 2>&1 || true
 		;;
 	*)
 		die "unknown backup state '$kind'"
@@ -153,17 +183,39 @@ do_rollback() {
 	esac
 
 	restore_config
-	if [ "$kind" != none ]; then
-		/etc/init.d/igmpproxy enable || true
-		/etc/init.d/igmpproxy restart || say "restart reported an error"
-	fi
 	rm -f /etc/config/igmpproxy.apk-new /etc/config/igmpproxy-opkg
 	rm -rf "$TMP"
+
+	# Check that what the backup describes is really back.
+	case "$kind" in
+	plus)
+		now=$(pkg_version igmpproxy-plus)
+		if [ "${now%-*}" != "${ver%-*}" ]; then   # ignore -r1 / -1 package release
+			say "expected igmpproxy-plus $ver, installed: ${now:-nothing}"
+			INCOMPLETE=1
+		fi
+		;;
+	stock)
+		installed igmpproxy || { say "stock igmpproxy is not installed"; INCOMPLETE=1; }
+		installed igmpproxy-plus && { say "igmpproxy-plus is still installed"; INCOMPLETE=1; }
+		;;
+	none)
+		installed igmpproxy-plus && { say "igmpproxy-plus is still installed"; INCOMPLETE=1; }
+		;;
+	esac
+	if [ "$kind" != none ]; then
+		activate || INCOMPLETE=1
+		if was_running && ! wait_running; then
+			say "the proxy was running before the install but is not running now. Log: logread -e igmpproxy"
+			INCOMPLETE=1
+		fi
+	fi
+
 	if [ "${INCOMPLETE:-0}" = 1 ]; then
-		say "rollback INCOMPLETE: the previous version could not be reinstalled"
+		say "rollback INCOMPLETE, see the messages above. Your config backup is in $BACKUP"
 		return 1
 	fi
-	say "rollback done"
+	say "rollback done: $kind $ver$(running && echo ", running")"
 }
 
 # --- install ------------------------------------------------------------------
@@ -191,10 +243,9 @@ do_install() {
 	fi
 
 	say "installing"
-	if ! pkg_add_files "$TMP/$PKG" "$TMP/$LUCI"; then
+	if ! pkg_add_files "$TMP/$PKG" "$TMP/$LUCI" || ! installed igmpproxy-plus; then
 		say "installation failed, rolling back"
-		do_rollback
-		exit 1
+		rollback_and_exit
 	fi
 
 	# Removing the stock package can drop an unmodified config file, and an
@@ -205,22 +256,18 @@ do_install() {
 	fi
 	rm -f /etc/config/igmpproxy.apk-new /etc/config/igmpproxy-opkg
 
-	/etc/init.d/igmpproxy enable || true
-	/etc/init.d/igmpproxy restart || say "restart reported an error"
+	act=0
+	activate || act=1
 	rm -f /tmp/luci-indexcache* 2>/dev/null || true
 
 	# Automatic rollback if it was running before and does not come up now.
-	if [ "$(cat "$BACKUP/was_running")" = 1 ]; then
-		i=0
-		until running; do
-			i=$((i + 1))
-			if [ "$i" -ge 10 ]; then
-				say "the proxy did not start, rolling back. Log: logread -e igmpproxy"
-				do_rollback
-				exit 1
-			fi
-			sleep 1
-		done
+	if was_running; then
+		if [ "$act" = 1 ] || ! wait_running; then
+			say "the proxy did not start, rolling back. Log: logread -e igmpproxy"
+			rollback_and_exit
+		fi
+	elif [ "$act" = 1 ]; then
+		say "warning: the service could not be enabled or started. Log: logread -e igmpproxy"
 	fi
 	rm -rf "$TMP"
 
@@ -242,8 +289,10 @@ do_uninstall() {
 	say "installing the stock igmpproxy package"
 	pkg_add_stock || die "could not install stock igmpproxy (no internet?). Undo with: igmpproxy-plus-install rollback"
 	restore_config
-	/etc/init.d/igmpproxy enable || true
-	/etc/init.d/igmpproxy restart || say "restart reported an error"
+	if ! activate || { was_running && ! wait_running; }; then
+		say "stock igmpproxy is installed but not running. Log: logread -e igmpproxy. Undo with: igmpproxy-plus-install rollback"
+		exit 1
+	fi
 	say "back on stock igmpproxy. Options only igmpproxy-plus knows are ignored."
 }
 

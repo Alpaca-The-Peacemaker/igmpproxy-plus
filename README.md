@@ -249,9 +249,12 @@ receivers on one LAN segment. The time is how long multicast keeps arriving afte
 
 Since 1.1.0 the proxy sends **IGMPv3 queries** (igmpproxy sends IGMPv2). Hosts then stay in
 IGMPv3, where every host reports and every host sends its leave, so host tracking and `auto`
-are exact even without IGMP snooping. With `queryversion 2`, hosts fall back to IGMPv2, where a
-host that hears another host's report stays quiet and may send no leave; `auto` then needs a
-snooping switch to be exact.
+are exact even without IGMP snooping. With `queryversion 2`, or while an IGMPv1/v2 host is
+present, a host that hears another host's report stays quiet and may send no leave, so the
+host list can be incomplete: `auto` then behaves like `off` and checks with group specific
+queries before stopping. In every mode a stream keeps flowing while any other tracked host is
+on it, even one that has been quiet for a long time (a quiet IGMPv2 host is indistinguishable
+from a powered-off one, so it is kept until the membership timeout).
 
 </details>
 
