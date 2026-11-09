@@ -834,13 +834,28 @@ void routeTableDumpJson(FILE *f, msec_t now) {
         fprintf(f, ",\"age_ms\":%llu,\"reports\":%lu,\"leaves\":%lu,\"leave_in_ms\":%lld,\"sources\":[",
                 (unsigned long long)(now - r->created), r->reports, r->leaves,
                 remainMs(r->leaveAt, now));
-        for (j = 0; j < MAX_ORIGINS; j++) {
-            if (!r->originAddrs[j])
-                continue;
-            fprintf(f, "%s\"%s\"", firstSrc ? "" : ",", inetFmt(r->originAddrs[j], buf));
-            firstSrc = 0;
+        {
+            // kernel forwarding counters, summed over the sources; clients
+            // turn two samples into a rate (Mbit/s per stream)
+            uint64_t pk = 0, by = 0, p, b;
+            int counted = 0;
+            for (j = 0; j < MAX_ORIGINS; j++) {
+                if (!r->originAddrs[j])
+                    continue;
+                fprintf(f, "%s\"%s\"", firstSrc ? "" : ",", inetFmt(r->originAddrs[j], buf));
+                firstSrc = 0;
+                if (getSGCount(r->originAddrs[j], r->group, &p, &b) == 0) {
+                    pk += p;
+                    by += b;
+                    counted = 1;
+                }
+            }
+            fputs("]", f);
+            if (counted)
+                fprintf(f, ",\"packets\":%llu,\"bytes\":%llu",
+                        (unsigned long long)pk, (unsigned long long)by);
         }
-        fputs("],\"members\":[", f);
+        fputs(",\"members\":[", f);
 
         for (i = 0; i < MAXVIFS && i < 32; i++) {
             struct VifState *v = &r->vif[i];

@@ -47,6 +47,19 @@ def main():
         os.killpg(rx[2].p.pid, signal.SIGUSR1)
         time.sleep(1)
 
+        # kernel byte counters per stream (Mbit/s on the status page)
+        def gbytes():
+            st = json.loads(ns("rtr", f"{binary} -S {SOCK}"))
+            g = next((g for g in st["groups"] if g["group"] == GROUP), {})
+            return g.get("bytes")
+        b1 = gbytes()
+        time.sleep(1)
+        b2 = gbytes()
+        if b1 is None or b2 is None or b2 <= b1:
+            problems.append(f"stream byte counters missing or not growing ({b1} -> {b2})")
+        else:
+            print(f"stream counters: {(b2 - b1) * 8 / 1000:.0f} kbit/s")
+
         q = ns("rtr", f"{binary} -Q {SOCK}")
         if '"ok":true' not in q:
             problems.append(f"-Q answered {q!r}")

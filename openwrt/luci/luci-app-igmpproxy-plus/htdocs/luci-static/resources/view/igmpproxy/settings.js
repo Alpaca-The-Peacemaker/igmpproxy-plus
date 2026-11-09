@@ -3,6 +3,8 @@
 'require form';
 'require uci';
 'require tools.widgets as widgets';
+'require ui';
+'require igmpproxy.common as common';
 
 var fastLeaveHelp = _('<b>A stream never stops while another device that asked for it is still receiving it</b>, in every mode. The modes only decide how fast it stops once the last device has left. <b>Off</b>: after the router checks that nobody else is still receiving (count x interval). <b>On</b>: instantly. <b>Auto</b>: instantly with IGMPv3 devices, after the check with IGMPv2 devices.');
 
@@ -17,13 +19,53 @@ function validateRange(min, max, unit) {
 	};
 }
 
+/* Channel names: a list the user loads or pastes, kept in /etc. */
+function channelSection(text) {
+	var ta = E('textarea', {
+		'class': 'cbi-input-textarea', 'wrap': 'off', 'spellcheck': 'false',
+		'style': 'width:100%;min-height:12em;font-family:monospace',
+		'placeholder': '#EXTM3U\n#EXTINF:-1,RTP 1\nrtp://@239.1.1.1:5000\n\n' + _('or one per line:') + '\n239.1.1.2 SIC'
+	}, [ text ]);
+	var info = E('span', { 'style': 'opacity:.75;margin-left:1em' });
+	var count = function() {
+		info.textContent = _('%d channel name(s) recognised').format(Object.keys(common.parseChannels(ta.value)).length);
+	};
+	ta.addEventListener('input', count);
+	count();
+
+	var file = E('input', { 'type': 'file', 'accept': '.m3u,.m3u8,.txt,.csv,text/plain', 'change': function(ev) {
+		var f = ev.target.files[0];
+		if (!f)
+			return;
+		var r = new FileReader();
+		r.onload = function() { ta.value = r.result; count(); };
+		r.readAsText(f);
+	} });
+
+	var save = E('button', { 'class': 'cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, function() {
+		return common.saveChannels(ta.value).then(function() {
+			ui.addNotification(null, E('p', _('Channel names saved: %d.').format(Object.keys(common.parseChannels(ta.value)).length)), 'info');
+		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Could not save the channel names: %s').format(e.message)), 'danger');
+		});
+	}) }, _('Save channel names'));
+
+	return E('div', { 'class': 'cbi-section' }, [
+		E('h3', {}, _('Channel names')),
+		E('div', { 'class': 'cbi-section-descr' }, _('Load or paste your provider\'s channel list to see channel names instead of multicast addresses on the Status and Events pages. Accepted: M3U/M3U8 playlists (rtp://, udp:// or udpxy http://.../rtp/ links) and plain lines such as "239.1.1.1 RTP 1" or "RTP 1,239.1.1.1". Lists for most providers are maintained by users in forums; this package does not ship any. Stored in %s and kept across upgrades. This button saves only the list; the settings above have their own Save.').format(common.CHANNELS)),
+		E('div', { 'style': 'margin:.5em 0' }, [ file ]),
+		ta,
+		E('div', { 'style': 'margin-top:.5em' }, [ save, info ])
+	]);
+}
+
 return view.extend({
 	load: function() {
-		return uci.load('igmpproxy');
+		return Promise.all([uci.load('igmpproxy'), common.loadChannelText()]);
 	},
 
-	render: function() {
-		var m, s, o;
+	render: function(data) {
+		var m, s, o, channelText = data[1] || '';
 
 		m = new form.Map('igmpproxy', _('IGMP Proxy'),
 			_('Multicast proxy with fine grained control over fast leave and the timers that decide how quickly multicast traffic stops after a leave.'));
@@ -237,6 +279,9 @@ return view.extend({
 		o.datatype = 'cidr4';
 		o.modalonly = true;
 
-		return m.render();
+		return m.render().then(function(node) {
+			node.appendChild(channelSection(channelText));
+			return node;
+		});
 	}
 });

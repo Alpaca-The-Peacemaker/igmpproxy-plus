@@ -253,6 +253,7 @@ void delVIF( struct IfDesc *Dp );
 int addMRoute( struct MRouteDesc * Dp );
 int delMRoute( struct MRouteDesc * Dp );
 int getVifIx( struct IfDesc *IfDp );
+int getSGCount(uint32_t src, uint32_t group, uint64_t *pkts, uint64_t *bytes);
 
 /* config.c
  */

@@ -99,8 +99,17 @@ reboot.
 ### 3. Use it
 
 - **Settings:** LuCI → Services → IGMP Proxy → Settings
-- **Live status:** LuCI → Services → IGMP Proxy → Status, or `igmpproxy -S` over SSH.
-  **Refresh groups** asks every device to report what it receives right now (`igmpproxy -Q`).
+- **Live status:** LuCI → Services → IGMP Proxy → Status, or `igmpproxy -S` over SSH. Shows
+  each stream's bit rate and each device's bandwidth, and warns about problems found in the
+  event log. **Refresh groups** asks every device to report what it receives right now
+  (`igmpproxy -Q`).
+- **Channel names:** Settings → Channel names. Load or paste your provider's channel list (M3U
+  with rtp://, udp:// or udpxy links, or lines like `239.1.1.1 RTP 1`) and the pages show
+  "RTP 1" instead of 239.1.1.1. Providers rarely publish these lists; users keep them up to date
+  in forums. Stored in `/etc/igmpproxy-channels.m3u`, kept across upgrades.
+- **Problem detection:** the Status and Events pages read the event log and point out, in plain
+  words, streams that stopped while a device still wanted them (a black screen) and devices
+  whose reports get lost.
 - **Event history:** LuCI → Services → IGMP Proxy → Events: every join, leave, stream start
   and stop (with the reason), timeout and query, with device names. **Download log** gives the
   complete history as JSON Lines, one event per line, ready for a script or an AI assistant

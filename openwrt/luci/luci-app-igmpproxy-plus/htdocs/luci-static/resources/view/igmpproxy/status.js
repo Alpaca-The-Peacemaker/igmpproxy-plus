@@ -1,15 +1,9 @@
 'use strict';
 'require view';
 'require fs';
-'require rpc';
 'require poll';
 'require ui';
-
-var callLeases = rpc.declare({
-	object: 'luci-rpc',
-	method: 'getDHCPLeases',
-	expect: { '': {} }
-});
+'require igmpproxy.common as common';
 
 /* Local discovery groups, shown under "Other" rather than as streams. */
 var KNOWN = {
@@ -17,6 +11,8 @@ var KNOWN = {
 	'224.0.0.251': _('mDNS / Bonjour'),
 	'224.0.0.252': _('LLMNR')
 };
+
+var ISSUE_HOURS = 24;
 
 function fetchStatus() {
 	return fs.exec('/usr/sbin/igmpproxy', ['-S']).then(function(res) {
@@ -30,17 +26,6 @@ function fetchStatus() {
 		}
 	}).catch(function(e) {
 		return { error: e.message };
-	});
-}
-
-function fetchNames() {
-	return L.resolveDefault(callLeases(), {}).then(function(res) {
-		var names = {};
-		(res.dhcp_leases || []).forEach(function(l) {
-			if (l.ipaddr && l.hostname)
-				names[l.ipaddr] = l.hostname;
-		});
-		return names;
 	});
 }
 
@@ -114,7 +99,26 @@ function channelState(g) {
 	return [dot('#2e9e44'), _('streaming')];
 }
 
-function render(st, names) {
+/*
+ * Bit rate per stream from two samples of the kernel byte counters.
+ * Returns { group: bits per second } for the groups that have a rate.
+ */
+var lastSample = {};
+function rates(st) {
+	var now = Date.now(), out = {}, next = {};
+	(st.groups || []).forEach(function(g) {
+		if (g.bytes == null)
+			return;
+		next[g.group] = { bytes: g.bytes, t: now };
+		var p = lastSample[g.group];
+		if (p && g.bytes >= p.bytes && now > p.t)
+			out[g.group] = (g.bytes - p.bytes) * 8 * 1000 / (now - p.t);
+	});
+	lastSample = next;
+	return out;
+}
+
+function render(st, names, channels, rate, issues) {
 	if (st.error)
 		return E('div', { 'class': 'alert-message warning' }, st.error);
 
@@ -125,18 +129,28 @@ function render(st, names) {
 		(local ? other : tv).push(g);
 	});
 
-	/* who is watching what: device -> channels */
+	/* who is receiving what: device -> streams */
 	var byHost = {};
 	tv.forEach(function(g) {
 		g.members.forEach(function(m) {
 			m.hosts.forEach(function(h) {
-				(byHost[h.address] = byHost[h.address] || { channels: [], v2: false }).channels.push(g.group);
+				var d = byHost[h.address] = byHost[h.address] || { channels: [], v2: false };
+				if (d.channels.indexOf(g.group) < 0)
+					d.channels.push(g.group);
 				if (m.compat === 'v2')
-					byHost[h.address].v2 = true;
+					d.v2 = true;
 			});
 		});
 	});
 	var hosts = Object.keys(byHost).sort();
+
+	var total = 0, measured = false;
+	tv.forEach(function(g) {
+		if (rate[g.group] != null) {
+			total += rate[g.group];
+			measured = true;
+		}
+	});
 
 	var stopAfter = c.fastleave === 'on' ? _('instantly')
 		: c.fastleave === 'auto' ? _('instantly (IGMPv3 boxes) or after %s').format(secs(c.last_member_query_count * c.last_member_query_interval_ms))
@@ -144,17 +158,31 @@ function render(st, names) {
 
 	var summary = E('div', { 'class': 'cbi-section', 'style': 'padding:.8em 1em;font-size:110%' }, [
 		dot('#2e9e44'), E('strong', {}, _('Running')), ' · ',
-		_('%d device(s) receiving %d stream(s)').format(hosts.length, tv.length), ' · ',
-		_('streams stop %s').format(stopAfter),
+		_('%d device(s) receiving %d stream(s)').format(hosts.length, tv.length),
+		tv.length ? [' · ', E('strong', {}, common.mbps(measured ? total : null)), ' ', _('from the provider')] : '',
+		' · ', _('streams stop %s').format(stopAfter),
 		E('div', { 'style': 'font-size:85%;opacity:.7;margin-top:.3em' },
 			_('Fast leave: %s · IGMPv%d queries · up %s').format(c.fastleave, c.query_version || 2, dur(st.uptime_ms)))
 	]);
 
+	var issueLine = '';
+	if (issues && issues.length)
+		issueLine = E('div', { 'class': 'alert-message warning', 'style': 'margin-bottom:1em' }, [
+			_('%d possible problem(s) in the last %d hours, e.g.: %s').format(issues.length, ISSUE_HOURS, issues[0].text), ' ',
+			E('a', { 'href': L.url('admin/services/igmpproxy/events') }, _('Details'))
+		]);
+
 	var watchRows = hosts.map(function(ip) {
-		var h = byHost[ip];
+		var h = byHost[ip], bw = 0, known = false;
+		h.channels.forEach(function(g) {
+			if (rate[g] != null) { bw += rate[g]; known = true; }
+		});
 		return [
 			device(ip, names),
-			E('span', {}, h.channels.map(function(ch) { return E('code', { 'style': 'margin-right:.5em' }, ch); })),
+			E('span', {}, h.channels.map(function(g) {
+				return E('span', { 'style': 'margin-right:.8em;white-space:nowrap' }, common.channel(g, channels));
+			})),
+			common.mbps(known ? bw : null),
 			h.v2 ? badge('IGMPv2', '#888') : badge('IGMPv3', '#2e7bcf')
 		];
 	});
@@ -167,8 +195,9 @@ function render(st, names) {
 				viewers.push(_('more'));
 		});
 		return [
-			E('code', {}, g.group),
+			common.channel(g.group, channels),
 			E('span', {}, channelState(g)),
+			common.mbps(rate[g.group]),
 			viewers.length ? viewers.join(', ') : E('em', {}, _('none')),
 			dur(g.age_ms)
 		];
@@ -190,10 +219,14 @@ function render(st, names) {
 
 	return E('div', {}, [
 		summary,
+		issueLine,
 		E('h3', {}, _('Devices')),
-		table([_('Device'), _('Streams'), _('IGMP')], watchRows, _('No device is receiving a stream right now')),
+		table([_('Device'), _('Streams'), _('Bandwidth'), _('IGMP')], watchRows, _('No device is receiving a stream right now')),
 		E('h3', {}, _('Streams')),
-		table([_('Stream (group)'), _('State'), _('Receiving'), _('Running for')], chanRows, _('No streams right now')),
+		table([_('Stream'), _('State'), _('Bit rate'), _('Receiving'), _('Running for')], chanRows, _('No streams right now')),
+		E('p', { 'style': 'font-size:85%;opacity:.7' }, Object.keys(channels).length
+			? _('Channel names from your channel list (Settings > Channel names).')
+			: _('Tip: add your provider\'s channel list under Settings > Channel names to see names instead of addresses.')),
 		E('details', { 'style': 'margin-top:1.5em' }, [
 			E('summary', { 'style': 'cursor:pointer' }, _('Details: interfaces and other multicast')),
 			table([_('Interface'), _('Address'), _('Role'), _('Leave settings')], ifRows, _('No interfaces')),
@@ -204,12 +237,13 @@ function render(st, names) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([fetchStatus(), fetchNames()]);
+		return Promise.all([fetchStatus(), common.fetchNames(), common.loadChannels(), common.fetchEvents()]);
 	},
 
 	render: function(data) {
-		var names = data[1];
-		var container = E('div', { 'id': 'igmpproxy-status' }, render(data[0], names));
+		var st = data[0], names = data[1], channels = data[2];
+		var issues = common.analyze(data[3].events || [], names, channels, ISSUE_HOURS);
+		var container = E('div', { 'id': 'igmpproxy-status' }, render(st, names, channels, rates(st), issues));
 
 		poll.add(function() {
 			return fetchStatus().then(function(st) {
@@ -219,7 +253,7 @@ return view.extend({
 				// keep the details section open across refreshes
 				var d = c.querySelector('details');
 				var open = d && d.open;
-				c.replaceChildren(render(st, names));
+				c.replaceChildren(render(st, names, channels, rates(st), issues));
 				var nd = c.querySelector('details');
 				if (open && nd)
 					nd.open = true;
@@ -238,7 +272,7 @@ return view.extend({
 						return fs.exec('/usr/sbin/igmpproxy', ['-Q']).then(function(res) {
 							note.textContent = res.code === 0
 								? _('Asked all devices; answers arrive within %d s').format(
-									Math.round(((data[0].config || {}).query_response_interval_ms || 10000) / 1000))
+									Math.round(((st.config || {}).query_response_interval_ms || 10000) / 1000))
 								: _('Could not send the query: %s').format((res.stderr || res.stdout || '').trim());
 						});
 					})

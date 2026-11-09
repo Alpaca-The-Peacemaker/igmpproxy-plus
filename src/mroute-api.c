@@ -40,12 +40,37 @@
 
 #include "igmpproxy.h"
 
+#include <sys/ioctl.h>
+
 // need an IGMP socket as interface for the mrouted API
 // - receives the IGMP messages
 int         MRouterFD = -1;     /* socket for all network I/O  */
 char        *recv_buf;          /* input packet buffer         */
 char        *send_buf;          /* output packet buffer        */
 
+
+/*
+** Packet and byte counters the kernel keeps for one (source, group)
+** forwarding entry. Returns 0 on success, -1 when the entry does not exist
+** (yet) or the system has no SIOCGETSGCNT.
+*/
+int getSGCount(uint32_t src, uint32_t group, uint64_t *pkts, uint64_t *bytes) {
+#ifdef SIOCGETSGCNT
+    struct sioc_sg_req sg;
+
+    memset(&sg, 0, sizeof(sg));
+    sg.src.s_addr = src;
+    sg.grp.s_addr = group;
+    if (MRouterFD < 0 || ioctl(MRouterFD, SIOCGETSGCNT, &sg) < 0)
+        return -1;
+    *pkts = (uint64_t)sg.pktcnt;
+    *bytes = (uint64_t)sg.bytecnt;
+    return 0;
+#else
+    (void)src; (void)group; (void)pkts; (void)bytes;
+    return -1;
+#endif
+}
 
 // my internal virtual interfaces descriptor vector
 static struct VifDesc {

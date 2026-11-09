@@ -78,6 +78,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y busybox
           sudo sh tools/test-installer.sh "$PWD/openwrt/install.sh"
+      - name: LuCI helpers (channel list parser, problem detection)
+        run: node tools/luci-common-test.js openwrt/luci/luci-app-igmpproxy-plus/htdocs/luci-static/resources/igmpproxy/common.js
 
   openwrt:
     name: OpenWrt ${{ matrix.release }} ${{ matrix.target }}

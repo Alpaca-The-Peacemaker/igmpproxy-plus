@@ -6,7 +6,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=igmpproxy-plus
-PKG_VERSION:=1.3.0
+PKG_VERSION:=1.4.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
@@ -40,6 +40,7 @@ endef
 
 define Package/igmpproxy-plus/conffiles
 /etc/config/igmpproxy
+/etc/igmpproxy-channels.m3u
 endef
 
 define Package/igmpproxy-plus/install

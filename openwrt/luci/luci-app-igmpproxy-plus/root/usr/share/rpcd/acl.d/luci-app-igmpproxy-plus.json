@@ -8,6 +8,9 @@
 				],
 				"/usr/sbin/igmpproxy -E": [
 					"exec"
+				],
+				"/etc/igmpproxy-channels.m3u": [
+					"read"
 				]
 			},
 			"ubus": {
@@ -29,6 +32,9 @@
 			"file": {
 				"/usr/sbin/igmpproxy -Q": [
 					"exec"
+				],
+				"/etc/igmpproxy-channels.m3u": [
+					"write"
 				]
 			},
 			"ubus": {

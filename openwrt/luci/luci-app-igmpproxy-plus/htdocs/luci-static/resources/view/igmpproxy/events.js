@@ -1,55 +1,10 @@
 'use strict';
 'require view';
-'require fs';
-'require rpc';
 'require ui';
-
-var callLeases = rpc.declare({
-	object: 'luci-rpc',
-	method: 'getDHCPLeases',
-	expect: { '': {} }
-});
+'require igmpproxy.common as common';
 
 var SHOW = 500;       /* rows rendered at most; the download has everything */
-
-function fetchEvents() {
-	/* exec_direct streams over HTTP: no ubus message size limit */
-	return fs.exec_direct('/usr/sbin/igmpproxy', ['-E'], 'text').then(function(text) {
-		var events = [], bad = 0;
-		(text || '').split('\n').forEach(function(line) {
-			if (!line)
-				return;
-			try { events.push(JSON.parse(line)); }
-			catch (e) { bad++; }
-		});
-		if (events.length == 1 && events[0].error)
-			return { error: events[0].error, raw: text };
-		return { events: events, bad: bad, raw: text };
-	}).catch(function(e) {
-		return { error: e.message || _('IGMP proxy is not running'), raw: '' };
-	});
-}
-
-function fetchNames() {
-	return L.resolveDefault(callLeases(), {}).then(function(res) {
-		var names = {};
-		(res.dhcp_leases || []).forEach(function(l) {
-			if (l.ipaddr && l.hostname)
-				names[l.ipaddr] = l.hostname;
-		});
-		return names;
-	});
-}
-
-function pad(n) { return (n < 10 ? '0' : '') + n; }
-
-function localTime(ts) {
-	var d = new Date(ts);
-	if (isNaN(d))
-		return ts;
-	return '%d-%s-%s %s:%s:%s'.format(d.getFullYear(), pad(d.getMonth() + 1), pad(d.getDate()),
-		pad(d.getHours()), pad(d.getMinutes()), pad(d.getSeconds()));
-}
+var ISSUE_HOURS = 24;
 
 function secs(ms) { return (ms / 1000).toFixed(1) + ' s'; }
 
@@ -110,13 +65,15 @@ function color(e) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([fetchEvents(), fetchNames()]);
+		return Promise.all([common.fetchEvents(), common.fetchNames(), common.loadChannels()]);
 	},
 
 	render: function(data) {
 		var self = this;
 		this.data = data[0];
 		this.names = data[1];
+		this.channels = data[2];
+		this.issues = E('div');
 
 		this.filter = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:16em',
 			'placeholder': _('Filter: device, group, event...'), 'input': function() { self.update(); } });
@@ -136,17 +93,20 @@ return view.extend({
 			E('h2', {}, _('IGMP Proxy: Events')),
 			E('div', { 'class': 'cbi-map-descr' },
 				_('History of joins, leaves, stream starts and stops, timeouts and queries, newest first. The download is the complete log as JSON Lines (one event per line), ready for scripts or an AI assistant ("why did the stream on 192.168.1.84 stop at 21:04?").')),
+			this.issues,
 			toolbar,
 			this.body
 		]);
 	},
 
 	update: function() {
-		var d = this.data, names = this.names;
+		var d = this.data, names = this.names, channels = this.channels;
 		if (d.error) {
+			this.issues.replaceChildren();
 			this.body.replaceChildren(E('div', { 'class': 'alert-message warning' }, d.error));
 			return;
 		}
+		this.issues.replaceChildren(common.issueBox(common.analyze(d.events, names, channels, ISSUE_HOURS), ISSUE_HOURS));
 		var q = (this.filter.value || '').toLowerCase(), routine = this.routine.checked;
 		var rows = [];
 		for (var i = d.events.length - 1; i >= 0 && rows.length < SHOW; i--) {
@@ -154,21 +114,21 @@ return view.extend({
 			if (!routine && !IMPORTANT[e.ev])
 				continue;
 			var text = describe(e, names);
-			if (q && (text + ' ' + JSON.stringify(e) + ' ' + (names[e.host] || '')).toLowerCase().indexOf(q) < 0)
+			if (q && (text + ' ' + JSON.stringify(e) + ' ' + (names[e.host] || '') + ' ' + (channels[e.group] || '')).toLowerCase().indexOf(q) < 0)
 				continue;
 			rows.push(E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, localTime(e.ts)),
+				E('td', { 'class': 'td', 'style': 'white-space:nowrap' }, common.localTime(e.ts)),
 				E('td', { 'class': 'td' }, [ E('span', { 'style': 'color:' + color(e) + ';margin-right:.35em' }, '●'), text ]),
-				E('td', { 'class': 'td' }, e.group ? E('code', {}, e.group) : ''),
+				E('td', { 'class': 'td' }, e.group ? common.channel(e.group, channels) : ''),
 				E('td', { 'class': 'td' }, e['if'] || '')
 			]));
 		}
-		var first = d.events.length ? localTime(d.events[0].ts) : '-';
+		var first = d.events.length ? common.localTime(d.events[0].ts) : '-';
 		var table = E('table', { 'class': 'table' }, [
 			E('tr', { 'class': 'tr table-titles' }, [
 				E('th', { 'class': 'th' }, _('Time')),
 				E('th', { 'class': 'th' }, _('What happened')),
-				E('th', { 'class': 'th' }, _('Stream (group)')),
+				E('th', { 'class': 'th' }, _('Stream')),
 				E('th', { 'class': 'th' }, _('Interface'))
 			])
 		]);
@@ -184,7 +144,7 @@ return view.extend({
 
 	reload: function() {
 		var self = this;
-		return fetchEvents().then(function(d) {
+		return common.fetchEvents().then(function(d) {
 			self.data = d;
 			self.update();
 		});
