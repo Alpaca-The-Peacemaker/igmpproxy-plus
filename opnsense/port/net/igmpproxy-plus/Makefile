@@ -1,4 +1,5 @@
 PORTNAME=	igmpproxy-plus
+DISTVERSIONPREFIX=	v
 DISTVERSION=	1.2.4
 CATEGORIES=	net
 
@@ -11,7 +12,6 @@ LICENSE=	GPLv2+
 USES=		autoreconf
 USE_GITHUB=	yes
 GH_ACCOUNT=	Alpaca-The-Peacemaker
-GH_TAGNAME=	v${DISTVERSION}
 GNU_CONFIGURE=	yes
 USE_RC_SUBR=	igmpproxy_plus
 

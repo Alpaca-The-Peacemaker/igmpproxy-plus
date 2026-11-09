@@ -29,6 +29,8 @@ jobs:
             git sparse-checkout set --no-cone /Mk /Templates /Keywords /net/Makefile /Makefile
             mkdir -p net
             cp -R "$GITHUB_WORKSPACE/opnsense/port/net/igmpproxy-plus" net/
+            git add --sparse net/igmpproxy-plus
+            echo DEVELOPER=yes >> /etc/make.conf
             cd net/igmpproxy-plus
             portlint -AC
             make BATCH=yes DISABLE_VULNERABILITIES=yes stage
