@@ -42,9 +42,24 @@
             return (h ? h + 'h ' : '') + (h || m ? m + 'm ' : '') + s + 's';
         }
 
+        // bit rate per stream from two samples of the kernel byte counters
+        let last = {};
+        function rate(g) {
+            const now = Date.now(), p = last[g.group];
+            let out = '-';
+            if (g.bytes != null) {
+                if (p && g.bytes >= p.bytes && now > p.t) {
+                    const bps = (g.bytes - p.bytes) * 8000 / (now - p.t);
+                    out = bps < 1e6 ? Math.round(bps / 1e3) + ' kbit/s' : (bps / 1e6).toFixed(1) + ' Mbit/s';
+                }
+                last[g.group] = {bytes: g.bytes, t: now};
+            }
+            return out;
+        }
+
         function render(st) {
             if (st.error) {
-                $('#status-error').text(st.error).show();
+                $('#status-error').text(st.error + (st.log && st.log.length ? ' ' + st.log.join(' | ') : '')).show();
                 $('#status-body').hide();
                 return;
             }
@@ -91,9 +106,10 @@
                     : '{{ lang._('not joined') }}';
                 rows += '<tr><td><b>' + esc(g.group) + '</b></td><td>' + esc(g.sources.join(', ') || '-') + '</td><td>' + up +
                     '</td><td>' + (members || '<em>{{ lang._('no listeners') }}</em>') + '</td><td>' +
+                    rate(g) + '</td><td>' + (g.start_delay_ms >= 0 ? ms(g.start_delay_ms) : '-') + '</td><td>' +
                     g.reports + ' / ' + g.leaves + '</td><td>' + ms(g.age_ms) + '</td></tr>';
             });
-            $('#tbl-groups tbody').html(rows || '<tr><td colspan="6"><em>{{ lang._('No active groups') }}</em></td></tr>');
+            $('#tbl-groups tbody').html(rows || '<tr><td colspan="8"><em>{{ lang._('No active groups') }}</em></td></tr>');
         }
 
         function refresh() {
@@ -101,6 +117,14 @@
                 render(data || {error: 'no data'});
             });
         }
+
+        $('#btn-refresh').on('click', function () {
+            ajaxCall('/api/igmpproxyplus/service/refresh', {}, function (data) {
+                $('#refresh-note').text(data && data.ok
+                    ? '{{ lang._('Asked all devices; answers arrive within the query response interval.') }}'
+                    : '{{ lang._('Could not send the query.') }}');
+            });
+        });
 
         refresh();
         setInterval(refresh, 2000);
@@ -111,6 +135,10 @@
 <div class="content-box">
     <div id="status-error" class="alert alert-warning" style="display:none; margin:10px;"></div>
     <div id="status-body" style="padding: 10px;">
+        <p>
+            <button id="btn-refresh" class="btn btn-primary btn-xs">{{ lang._('Refresh groups') }}</button>
+            <span id="refresh-note" class="text-muted"></span>
+        </p>
         <h3>{{ lang._('Settings in use') }}</h3>
         <table class="table table-condensed">
             <thead>
@@ -158,6 +186,8 @@
                 <th>{{ lang._('Sources') }}</th>
                 <th>{{ lang._('Upstream') }}</th>
                 <th>{{ lang._('Downstream members') }}</th>
+                <th>{{ lang._('Bit rate') }}</th>
+                <th>{{ lang._('Started in') }}</th>
                 <th>{{ lang._('Reports / leaves') }}</th>
                 <th>{{ lang._('Age') }}</th>
             </tr>

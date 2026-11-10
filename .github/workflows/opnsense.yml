@@ -28,6 +28,9 @@ jobs:
           copyback: true
           run: |
             sh tools/opnsense-build.sh out
+            # forwarding, start delay, leave and event log on FreeBSD itself
+            pkg install -y python3 >/dev/null
+            sh tools/freebsd-jail-test.sh /tmp/opnsense-build/src/src/igmpproxy
       - uses: actions/upload-artifact@v4
         with:
           name: opnsense-freebsd-${{ matrix.freebsd }}

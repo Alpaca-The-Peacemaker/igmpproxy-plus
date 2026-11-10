@@ -45,10 +45,30 @@ class ServiceController extends ApiMutableServiceControllerBase
     {
         $response = (new Backend())->configdRun('igmpproxyplus groups');
         $data = json_decode((string)$response, true);
-        if (!is_array($data)) {
-            return ['error' => gettext('IGMP Proxy Plus is not running.')];
+        if (!is_array($data) || isset($data['error'])) {
+            // say why: the last lines the daemon or its rc script logged
+            $log = [];
+            foreach (explode("\n", (string)(new Backend())->configdRun('igmpproxyplus lastlog')) as $line) {
+                $line = trim(preg_replace('/^.*\] /', '', $line));
+                if ($line !== '') {
+                    $log[] = $line;
+                }
+            }
+            return ['error' => gettext('IGMP Proxy Plus is not running.'), 'log' => $log];
         }
         return $data;
+    }
+
+    /**
+     * Send a general query now, so every device reports what it receives.
+     */
+    public function refreshAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['error' => 'POST required'];
+        }
+        $data = json_decode((string)(new Backend())->configdRun('igmpproxyplus refresh'), true);
+        return is_array($data) ? $data : ['error' => gettext('IGMP Proxy Plus is not running.')];
     }
 
     /**
