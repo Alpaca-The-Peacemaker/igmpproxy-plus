@@ -101,12 +101,29 @@ rollback_and_exit() {
 }
 
 # download <base-url> <file>
+# curl first when it is installed: OpenWrt's own wget (uclient-fetch) stalls
+# on some HTTPS servers right after the handshake, github.com among them
+# since November 2026 (the data arrives, wget never reads it).
 fetch() {
 	mkdir -p "$TMP"
-	wget -q -O "$TMP/$2" "$1/$2" || {
-		rm -f "$TMP/$2"
-		return 1
-	}
+	if command -v curl >/dev/null 2>&1 &&
+	   curl -fsSL --connect-timeout 15 --max-time 300 -o "$TMP/$2" "$1/$2" 2>/dev/null; then
+		return 0
+	fi
+	wget -q -O "$TMP/$2" "$1/$2" && return 0
+	rm -f "$TMP/$2"
+	return 1
+}
+
+# a package download failed: missing package, or no download at all?
+download_failed() {
+	if fetch "$URL" SHA256SUMS; then
+		die "no prebuilt package $1 for $ARCH on OpenWrt $SERIES. Build it with the SDK, see the README."
+	fi
+	if command -v curl >/dev/null 2>&1; then
+		die "could not download from $URL. Check the router's internet access."
+	fi
+	die "could not download from $URL. OpenWrt's wget stalls on some HTTPS servers, GitHub among them: install curl ($([ "$PM" = apk ] && echo "apk add curl" || echo "opkg update && opkg install curl")) and run this again."
 }
 
 # --- backup -------------------------------------------------------------------
@@ -231,9 +248,9 @@ do_install() {
 
 	say "OpenWrt $DISTRIB_RELEASE, $ARCH, using $PM"
 	say "downloading $PKG"
-	fetch "$URL" "$PKG" || die "no prebuilt package for $ARCH on OpenWrt $SERIES. Build it with the SDK, see the README."
+	fetch "$URL" "$PKG" || download_failed "$PKG"
 	say "downloading $LUCI"
-	fetch "$URL" "$LUCI" || die "could not download $LUCI"
+	fetch "$URL" "$LUCI" || download_failed "$LUCI"
 
 	save_backup
 

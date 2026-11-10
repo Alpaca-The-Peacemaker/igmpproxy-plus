@@ -7,7 +7,8 @@
 # usage: sh tools/test-installer.sh [path/to/install.sh]
 set -u
 INSTALLER=${1:-$(cd "$(dirname "$0")/.." && pwd)/openwrt/install.sh}
-SH=${SH:-busybox ash}
+BUSYBOX=$(command -v busybox) || { echo "busybox is needed"; exit 1; }
+SH=${SH:-$BUSYBOX ash}
 MOCK=/var/mockwrt
 FAILS=0
 
@@ -72,11 +73,25 @@ restart)
 *) exit 0 ;;
 esac
 EOF
-	chmod +x "$MOCK/bin/apk" "$MOCK/bin/wget" /etc/init.d/igmpproxy
-	export PATH="$MOCK/bin:$PATH"
+	# fake curl: absent unless a test creates it (the real one must not be used)
+	cat > "$MOCK/bin/curl" <<'EOF'
+#!/bin/sh
+[ -f /var/mockwrt/fail_curl ] && exit 28
+while [ $# -gt 1 ]; do [ "$1" = -o ] && out=$2; shift; done
+echo "curl" > /var/mockwrt/used_curl
+exec /var/mockwrt/bin/wget -q -O "$out" "$1"
+EOF
+	chmod +x "$MOCK/bin/apk" "$MOCK/bin/wget" "$MOCK/bin/curl" /etc/init.d/igmpproxy
+	# the installer sees only the mocks and busybox, never a real curl or
+	# wget of the test host; the fake curl is enabled per test (with_curl)
+	mkdir -p "$MOCK/tools"
+	for a in $($BUSYBOX --list); do ln -sf "$BUSYBOX" "$MOCK/tools/$a"; done
+	rm -f "$MOCK/tools/wget" "$MOCK/tools/curl"
+	mv "$MOCK/bin/curl" "$MOCK/curl.fake"
 }
 
-run() { $SH "$INSTALLER" "$@" > "$MOCK/out" 2>&1; echo $? > "$MOCK/rc"; }
+run() { PATH="$MOCK/bin:$MOCK/tools" $SH "$INSTALLER" "$@" > "$MOCK/out" 2>&1; echo $? > "$MOCK/rc"; }
+with_curl() { cp "$MOCK/curl.fake" "$MOCK/bin/curl"; }
 ver() { cat "$MOCK/pkgs/$1" 2>/dev/null || echo "-"; }
 check() {
 	if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1: expected '$3', got '$2'"; FAILS=$((FAILS + 1)); sed 's/^/       | /' "$MOCK/out"; fi
@@ -140,6 +155,8 @@ run
 check "exit code" "$(cat "$MOCK/rc")" 1
 check "stock untouched" "$(ver igmpproxy)" "0.4-r1"
 check "no backup made" "$([ -d /etc/igmpproxy-plus-backup ] && echo yes || echo no)" no
+check "says download failed" "$(grep -c "could not download" "$MOCK/out")" 1
+check "suggests curl" "$(grep -c "add curl" "$MOCK/out")" 1
 
 echo "7. failed restart still triggers the automatic rollback"
 setup
@@ -195,6 +212,24 @@ rm -f "$MOCK/fail_stock"
 check "exit code" "$(cat "$MOCK/rc")" 1
 check "says incomplete" "$(grep -c INCOMPLETE "$MOCK/out")" 1
 check "config restored" "$(cat /etc/config/igmpproxy)" "config igmpproxy 'user-config'"
+
+echo "12. curl is used when installed"
+setup
+echo "0.4-r1" > "$MOCK/pkgs/igmpproxy"
+with_curl
+run
+check "exit code" "$(cat "$MOCK/rc")" 0
+check "plus installed" "$(ver igmpproxy-plus)" "1.0.2-r1"
+check "curl used" "$(cat "$MOCK/used_curl" 2>/dev/null)" curl
+
+echo "13. failing curl falls back to wget"
+setup
+echo "0.4-r1" > "$MOCK/pkgs/igmpproxy"
+with_curl
+touch "$MOCK/fail_curl"
+run
+check "exit code" "$(cat "$MOCK/rc")" 0
+check "plus installed" "$(ver igmpproxy-plus)" "1.0.2-r1"
 
 echo
 if [ "$FAILS" = 0 ]; then echo "all installer tests passed"; else echo "$FAILS installer checks failed"; exit 1; fi

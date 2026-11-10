@@ -74,6 +74,15 @@ What it does, step by step:
 Your TV may stutter for a second while the proxy restarts. You can read the script before
 running it: [openwrt/install.sh](openwrt/install.sh).
 
+> **Download hangs or "Connection timed out"?** OpenWrt's built-in `wget` stalls on some
+> HTTPS servers, github.com among them since November 2026: the connection works, but `wget`
+> never reads the answer. Install `curl` (`apk add curl` on 25.12, `opkg update && opkg install
+> curl` on 24.10) and use it to start the installer, which then uses curl for every download:
+>
+> ```sh
+> curl -fsSL -o /tmp/install.sh https://github.com/Alpaca-The-Peacemaker/igmpproxy-plus/releases/latest/download/install.sh && sh /tmp/install.sh
+> ```
+
 > **Want a full router backup too?** Before installing, run
 > `sysupgrade -b /tmp/router-backup.tar.gz` and copy that file to your computer. It contains
 > your whole router configuration.
