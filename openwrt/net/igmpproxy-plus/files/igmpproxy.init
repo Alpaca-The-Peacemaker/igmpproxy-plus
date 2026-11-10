@@ -128,6 +128,8 @@ igmp_add_phyint() {
 	# unless asked to. The firewall already drops it coming back in.
 	if [ "$direction" = "downstream" ] && [ "$proxy_ssdp" != 1 ]; then
 		echo "	blacklist 239.255.255.250/32" >> "$CONFIGFILE"
+		# CoAP discovery of smart home devices, same story
+		echo "	blacklist 224.0.1.187/32" >> "$CONFIGFILE"
 	fi
 }
 

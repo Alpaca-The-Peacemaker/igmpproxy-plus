@@ -89,7 +89,7 @@ void acceptGroupReport(uint32_t src, uint32_t group, int version) {
 
     sourceVif = getIfByAddress( src );
     if(sourceVif == NULL) {
-        my_log(LOG_WARNING, 0, "No interfaces found for source %s",
+        my_log(LINKLOCAL_SRC(src) ? LOG_INFO : LOG_WARNING, 0, "No interfaces found for source %s",
             inetFmt(src,s1));
         return;
     }
@@ -136,7 +136,7 @@ void acceptLeaveMessage(uint32_t src, uint32_t group) {
 
     sourceVif = getIfByAddress( src );
     if(sourceVif == NULL) {
-        my_log(LOG_WARNING, 0, "No interfaces found for source %s",
+        my_log(LINKLOCAL_SRC(src) ? LOG_INFO : LOG_WARNING, 0, "No interfaces found for source %s",
             inetFmt(src,s1));
         return;
     }

@@ -3,6 +3,7 @@
         <IGMPProxyPlus VisibleName="IGMP Proxy Plus" cssClass="fa fa-sitemap fa-fw">
             <Settings order="10" url="/ui/igmpproxyplus/"/>
             <Status order="20" url="/ui/igmpproxyplus/index/status"/>
+            <Events order="30" url="/ui/igmpproxyplus/index/events"/>
         </IGMPProxyPlus>
     </Services>
 </menu>

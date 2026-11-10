@@ -50,12 +50,30 @@ function channelSection(text) {
 		});
 	}) }, _('Save channel names'));
 
+	var allow = E('button', { 'class': 'cbi-button', 'style': 'margin-left:.5em',
+		'title': _('Set the group whitelist of the upstream interface to the networks of this channel list'),
+		'click': ui.createHandlerFn(this, function() {
+			var nets = common.whitelistFromChannels(common.parseChannels(ta.value));
+			var ups = uci.sections('igmpproxy', 'phyint').filter(function(s) { return s.direction == 'upstream'; });
+			if (!nets.length || !ups.length) {
+				ui.addNotification(null, E('p', !nets.length ? _('The channel list is empty.') : _('There is no upstream interface.')), 'warning');
+				return;
+			}
+			if (!confirm(_('Only groups in these networks will be requested from the provider:\n\n%s\n\nEverything else (smart home discovery and so on) stays local. Careful: set-top boxes may also need groups that are not in a channel list (programme guide, software updates). If something stops working, remove the whitelist under Interfaces > Edit > Filters.\n\nContinue?').format(nets.join('\n'))))
+				return;
+			ups.forEach(function(s) { uci.set('igmpproxy', s['.name'], 'whitelist', nets); });
+			return uci.save().then(function() {
+				ui.changes.init();
+				ui.addNotification(null, E('p', _('Whitelist of %d network(s) prepared for the upstream interface. Press "Save & Apply" to activate it.').format(nets.length)), 'info');
+			});
+		}) }, _('Allow only these channels upstream'));
+
 	return E('div', { 'class': 'cbi-section' }, [
 		E('h3', {}, _('Channel names')),
 		E('div', { 'class': 'cbi-section-descr' }, _('Load or paste your provider\'s channel list to see channel names instead of multicast addresses on the Status and Events pages. Accepted: M3U/M3U8 playlists (rtp://, udp:// or udpxy http://.../rtp/ links) and plain lines such as "239.1.1.1 RTP 1" or "RTP 1,239.1.1.1". Lists for most providers are maintained by users in forums; this package does not ship any. Stored in %s and kept across upgrades. This button saves only the list; the settings above have their own Save.').format(common.CHANNELS)),
 		E('div', { 'style': 'margin:.5em 0' }, [ file ]),
 		ta,
-		E('div', { 'style': 'margin-top:.5em' }, [ save, info ])
+		E('div', { 'style': 'margin-top:.5em' }, [ save, allow, info ])
 	]);
 }
 
@@ -155,8 +173,8 @@ return view.extend({
 		o.datatype = 'range(0,65535)';
 		o.placeholder = '256';
 
-		o = s.taboption('advanced', form.Flag, 'proxy_ssdp', _('Proxy SSDP (239.255.255.250)'),
-			_('By default UPnP discovery traffic is kept local and never joined upstream. Enable only if you really need SSDP from the upstream network.'));
+		o = s.taboption('advanced', form.Flag, 'proxy_ssdp', _('Proxy local discovery (SSDP, CoAP)'),
+			_('By default UPnP (239.255.255.250) and smart home (224.0.1.187) discovery traffic is kept local and never joined upstream. Enable only if you really need it from the upstream network.'));
 		o.default = '0';
 
 		o = s.taboption('advanced', form.Flag, 'event_log', _('Event log'),

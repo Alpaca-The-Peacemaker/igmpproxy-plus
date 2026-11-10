@@ -255,6 +255,8 @@ void delVIF( struct IfDesc *Dp );
 int addMRoute( struct MRouteDesc * Dp );
 int delMRoute( struct MRouteDesc * Dp );
 int getVifIx( struct IfDesc *IfDp );
+// 169.254.0.0/16: a host without a DHCP lease; not worth a warning
+#define LINKLOCAL_SRC(a) ((ntohl(a) & 0xffff0000U) == 0xa9fe0000U)
 int getSGCount(uint32_t src, uint32_t group, uint64_t *pkts, uint64_t *bytes);
 
 /* config.c

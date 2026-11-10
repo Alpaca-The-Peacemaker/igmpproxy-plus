@@ -9,7 +9,8 @@
 var KNOWN = {
 	'239.255.255.250': _('UPnP / SSDP discovery'),
 	'224.0.0.251': _('mDNS / Bonjour'),
-	'224.0.0.252': _('LLMNR')
+	'224.0.0.252': _('LLMNR'),
+	'224.0.1.187': _('CoAP (smart home discovery)')
 };
 
 var ISSUE_HOURS = 24;
@@ -83,12 +84,14 @@ function table(headers, rows, empty) {
 
 /* Plain-language state of one stream, over all downstream interfaces:
  * the most active member decides (streaming > checking > stopped). */
-function channelState(g) {
+function channelState(g, stall) {
 	if (!g.members.length)
 		return [dot('#999'), _('no receivers')];
 	var fwd = g.members.filter(function(m) { return m.forwarding; });
 	if (!fwd.length)
 		return [dot('#999'), _('stopped, waiting for a device to answer')];
+	if (stall != null)
+		return [dot('#c0392b'), _('no data from the provider for %d s').format(stall)];
 	if (g.leave_in_ms >= 0)
 		return [dot('#e0a000'), _('stopping in %s').format(secs(g.leave_in_ms))];
 	var steady = fwd.filter(function(m) {
@@ -120,9 +123,35 @@ function rates(st) {
 	return out;
 }
 
+/*
+ * Streams that devices are receiving but that carry no data: joined at the
+ * provider, forwarding, had a real bit rate before and now nothing for
+ * STALL_S seconds. Returns { group: seconds without data }.
+ */
+var STALL_S = 10, zeroSince = {}, peak = {};
+function stalled(st, rate) {
+	var now = Date.now(), out = {}, next = {}, nextPeak = {};
+	(st.groups || []).forEach(function(g) {
+		var r = rate[g.group];
+		nextPeak[g.group] = Math.max(peak[g.group] || 0, r || 0);
+		var fwd = g.members.some(function(m) { return m.forwarding; });
+		if (!fwd || g.upstream !== 'joined' || r !== 0 || nextPeak[g.group] < 500e3)
+			return;
+		next[g.group] = zeroSince[g.group] || now;
+		var s = Math.round((now - next[g.group]) / 1000);
+		if (s >= STALL_S)
+			out[g.group] = s;
+	});
+	zeroSince = next;
+	peak = nextPeak;
+	return out;
+}
+
 function render(st, names, channels, rate, issues) {
 	if (st.error)
 		return E('div', { 'class': 'alert-message warning' }, st.error);
+
+	var stall = stalled(st, rate);
 
 	var c = st.config;
 	var tv = [], other = [];
@@ -170,6 +199,10 @@ function render(st, names, channels, rate, issues) {
 	var joinFail = st.upstream_join_failures ? E('div', { 'class': 'alert-message danger', 'style': 'margin-bottom:1em' },
 		_('%d upstream join(s) were refused by the system since the proxy started: those streams were not requested from the provider. See the Events page and the system log.').format(st.upstream_join_failures)) : '';
 
+	var stallLine = Object.keys(stall).length ? E('div', { 'class': 'alert-message danger', 'style': 'margin-bottom:1em' },
+		_('No data is arriving from the provider for: %s. Devices are asking for it and the proxy has requested it, so the cause is upstream (provider, modem or the cable to it).').format(
+			Object.keys(stall).map(function(g) { return common.channelText(g, channels); }).join(', '))) : '';
+
 	var issueLine = '';
 	if (issues && issues.length)
 		issueLine = E('div', { 'class': 'alert-message warning', 'style': 'margin-bottom:1em' }, [
@@ -201,9 +234,10 @@ function render(st, names, channels, rate, issues) {
 		});
 		return [
 			common.channel(g.group, channels),
-			E('span', {}, channelState(g)),
+			E('span', {}, channelState(g, stall[g.group])),
 			common.mbps(rate[g.group]),
 			viewers.length ? viewers.join(', ') : E('em', {}, _('none')),
+			g.start_delay_ms >= 0 ? secs(g.start_delay_ms) : '-',
 			dur(g.age_ms)
 		];
 	});
@@ -225,11 +259,12 @@ function render(st, names, channels, rate, issues) {
 	return E('div', {}, [
 		summary,
 		joinFail,
+		stallLine,
 		issueLine,
 		E('h3', {}, _('Devices')),
 		table([_('Device'), _('Streams'), _('Bandwidth'), _('IGMP')], watchRows, _('No device is receiving a stream right now')),
 		E('h3', {}, _('Streams')),
-		table([_('Stream'), _('State'), _('Bit rate'), _('Receiving'), _('Running for')], chanRows, _('No streams right now')),
+		table([_('Stream'), _('State'), _('Bit rate'), _('Receiving'), _('Started in'), _('Running for')], chanRows, _('No streams right now')),
 		E('p', { 'style': 'font-size:85%;opacity:.7' }, Object.keys(channels).length
 			? _('Channel names from your channel list (Settings > Channel names).')
 			: _('Tip: add your provider\'s channel list under Settings > Channel names to see names instead of addresses.')),

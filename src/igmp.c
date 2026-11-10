@@ -154,7 +154,7 @@ void acceptIgmp(int recvlen) {
                             my_log(LOG_DEBUG, 0, "The source address %s for group %s is from downstream VIF[%d]. Ignoring.",
                                 inetFmt(src, s1), inetFmt(dst, s2), i);
                         } else {
-                            my_log(LOG_WARNING, 0, "The source address %s for group %s, is not in any valid net for upstream VIF[%d].",
+                            my_log(LINKLOCAL_SRC(src) ? LOG_INFO : LOG_WARNING, 0, "The source address %s for group %s, is not in any valid net for upstream VIF[%d].",
                                 inetFmt(src, s1), inetFmt(dst, s2), i);
                         }
                     } else {

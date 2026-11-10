@@ -93,6 +93,8 @@ struct RouteTable {
     msec_t              created;
     msec_t              leaveAt;    // pending upstream leave / removal, 0 = none
     msec_t              joinRetryAt; // an upstream join failed: retry then
+    msec_t              joinedAt;   // last successful upstream join
+    int                 startDelay; // ms from that join to the first packet, -1 = not seen
     unsigned long       reports;
     unsigned long       leaves;
 
@@ -173,6 +175,8 @@ static void sendJoinLeaveUpstream(struct RouteTable* route, int join) {
                    inetFmt(route->group, s1), upstrIf->Name);
             if ((err = k_join(upstrIf, route->group)) == 0) {
                 BIT_SET(route->upstrJoined, i);
+                route->joinedAt = now_ms();
+                route->startDelay = -1;
                 eventLog("upstream_join", route->group, upstrIf, 0, NULL);
             } else {
                 failed = 1;
@@ -349,6 +353,7 @@ static struct RouteTable *createRoute(uint32_t group) {
     r->group = group;
     r->upstrVif = -1;
     r->upstrState = ROUTESTATE_NOTJOINED;
+    r->startDelay = -1;
     r->created = now_ms();
 
     if (routing_table == NULL || routing_table->group > group) {
@@ -589,6 +594,13 @@ int activateRoute(uint32_t group, uint32_t originAddr, int upstrVif) {
     }
     croute->upstrVif = upstrVif;
 
+    // First packet after an upstream join: how long the provider took
+    if (originAddr > 0 && croute->joinedAt && croute->startDelay < 0) {
+        croute->startDelay = (int)(now_ms() - croute->joinedAt);
+        eventLog("first_packet", croute->group, getIfByVifIndex(upstrVif), originAddr,
+                 "\"delay_ms\":%d", croute->startDelay);
+    }
+
     // Always install: with no listeners this is an empty entry that stops
     // repeated kernel upcalls for the same flow.
     internUpdateKernelRoute(croute, 1);
@@ -682,11 +694,12 @@ msec_t routeTableTick(msec_t now) {
             if (v->expires && v->expires <= now) {
                 struct IfDesc *Dp = getIfByVifIndex(i);
                 if (v->leftBy) {
-                    my_log(LOG_WARNING, 0, "Group %s: stopped on %s, no member answered after leave from %s",
+                    my_log(r->originAddrs[0] ? LOG_WARNING : LOG_INFO, 0, "Group %s: stopped on %s, no member answered after leave from %s",
                            inetFmt(r->group, s1), Dp ? Dp->Name : "?", inetFmt(v->leftBy, s2));
                     eventLog("forward_stop", r->group, Dp, v->leftBy, "\"reason\":\"no_answer\"");
                 } else {
-                    my_log(LOG_WARNING, 0, "Group %s: stopped on %s, no report for %us (membership timeout)",
+                    // a group that never carried traffic (device discovery) is routine
+                    my_log(r->originAddrs[0] ? LOG_WARNING : LOG_INFO, 0, "Group %s: stopped on %s, no report for %us (membership timeout)",
                            inetFmt(r->group, s1), Dp ? Dp->Name : "?", ifGroupMembershipInterval(Dp) / 1000);
                     eventLog("forward_stop", r->group, Dp, 0, "\"reason\":\"timeout\",\"timeout_s\":%u",
                              ifGroupMembershipInterval(Dp) / 1000);
@@ -848,9 +861,9 @@ void routeTableDumpJson(FILE *f, msec_t now) {
                 r == routing_table ? "" : ",", inetFmt(r->group, buf),
                 r->upstrState == ROUTESTATE_JOINED ? "joined" : "not-joined");
         if (up) jsonStr(f, up->Name); else fputs("null", f);
-        fprintf(f, ",\"age_ms\":%llu,\"reports\":%lu,\"leaves\":%lu,\"leave_in_ms\":%lld,\"sources\":[",
+        fprintf(f, ",\"age_ms\":%llu,\"reports\":%lu,\"leaves\":%lu,\"leave_in_ms\":%lld,\"start_delay_ms\":%d,\"sources\":[",
                 (unsigned long long)(now - r->created), r->reports, r->leaves,
-                remainMs(r->leaveAt, now));
+                remainMs(r->leaveAt, now), r->startDelay);
         {
             // kernel forwarding counters, summed over the sources; clients
             // turn two samples into a rate (Mbit/s per stream)

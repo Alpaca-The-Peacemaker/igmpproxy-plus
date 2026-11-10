@@ -38,12 +38,16 @@ def main():
             ns(f"rx{i}", f"sysctl -qw net.ipv4.conf.r{i}.force_igmp_version=2")
         procs.append(Proc(f"nsenter --net=/run/netns/rtr {binary} -d -v {conf}", os.path.join(tmp, "proxy.log")))
         time.sleep(1)
-        procs.append(Proc(f"nsenter --net=/run/netns/src python3 -c '{SENDER}' ev-sender", os.devnull))
         rx = {}
         for i in (1, 2):      # rx2 joins last, so in IGMPv2 its leave is sent
             rx[i] = Proc(f"nsenter --net=/run/netns/rx{i} python3 -u -c '{RECV}' ev-recv", os.path.join(tmp, f"r{i}.log"))
             procs.append(rx[i])
             time.sleep(1.5)
+            if i == 1:
+                # the stream starts 1.5 s after the first join: the proxy
+                # must report that start delay (first_packet)
+                procs.append(Proc(f"nsenter --net=/run/netns/src python3 -c '{SENDER}' ev-sender", os.devnull))
+                time.sleep(1)
         os.killpg(rx[2].p.pid, signal.SIGUSR1)
         time.sleep(1)
 
@@ -52,6 +56,12 @@ def main():
             st = json.loads(ns("rtr", f"{binary} -S {SOCK}"))
             g = next((g for g in st["groups"] if g["group"] == GROUP), {})
             return g.get("bytes")
+        st = json.loads(ns("rtr", f"{binary} -S {SOCK}"))
+        delay = next((g.get("start_delay_ms") for g in st["groups"] if g["group"] == GROUP), None)
+        if delay is None or not 1000 <= delay <= 3500:
+            problems.append(f"start_delay_ms is {delay}, expected about 1500")
+        else:
+            print(f"start delay: {delay} ms")
         b1 = gbytes()
         time.sleep(1)
         b2 = gbytes()
@@ -89,6 +99,9 @@ def main():
         ]:
             if not has(ev, **kw):
                 problems.append(f"missing {ev} {kw}")
+        fp = [e for e in events if e.get("ev") == "first_packet" and e.get("group") == GROUP]
+        if len(fp) != 1 or fp[0].get("delay_ms") != delay:
+            problems.append(f"first_packet events: {fp}")
         if not all("ts" in e and e["ts"].endswith("Z") for e in events):
             problems.append("event without a UTC timestamp")
 

@@ -50,4 +50,20 @@ class ServiceController extends ApiMutableServiceControllerBase
         }
         return $data;
     }
+
+    /**
+     * The last events of the daemon's event log, newest first.
+     */
+    public function eventsAction()
+    {
+        $response = (string)(new Backend())->configdRun('igmpproxyplus events');
+        $events = [];
+        foreach (explode("\n", $response) as $line) {
+            $e = json_decode($line, true);
+            if (is_array($e) && isset($e['ev'])) {
+                $events[] = $e;
+            }
+        }
+        return ['events' => array_reverse($events)];
+    }
 }

@@ -43,6 +43,8 @@ function describe(e, names) {
 		return _('%s uses IGMPv%d: IGMPv2 compatibility on').format(dev, e.igmp);
 	case 'upstream_join':
 		return _('Joined the stream from the provider');
+	case 'first_packet':
+		return _('First data from the provider arrived after %s').format(secs(e.delay_ms));
 	case 'upstream_leave':
 		return _('Left the stream at the provider');
 	case 'upstream_join_failed':
@@ -56,12 +58,12 @@ function describe(e, names) {
 }
 
 var IMPORTANT = { start: 1, exit: 1, join: 1, leave: 1, leave_answered: 1, forward_start: 1,
-	forward_stop: 1, host_timeout: 1, compat_v2: 1, upstream_join: 1, upstream_leave: 1, upstream_join_failed: 1 };
+	forward_stop: 1, host_timeout: 1, compat_v2: 1, upstream_join: 1, first_packet: 1, upstream_leave: 1, upstream_join_failed: 1 };
 
 function color(e) {
 	if (e.ev == 'forward_stop' || e.ev == 'host_timeout' || e.ev == 'upstream_join_failed') return '#c0392b';
 	if (e.ev == 'leave') return '#e0a000';
-	if (e.ev == 'join' || e.ev == 'forward_start' || e.ev == 'leave_answered') return '#2e9e44';
+	if (e.ev == 'join' || e.ev == 'forward_start' || e.ev == 'leave_answered' || e.ev == 'first_packet') return '#2e9e44';
 	return '#888';
 }
 

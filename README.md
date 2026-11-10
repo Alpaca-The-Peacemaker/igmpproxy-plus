@@ -189,6 +189,20 @@ for those, the router sends its checks in IGMPv2 format automatically.
 
 ## Questions
 
+**A stream is slow to start or shows no picture. Is it my network or the provider?**
+Since 1.5.0 the Status page answers that. *Started in* shows how long the provider took to
+deliver the first data after the router asked for the stream (event `first_packet`,
+`start_delay_ms` in `igmpproxy -S`); starts slower than 3 s are listed as possible problems.
+If devices are receiving a stream that carried data before and nothing arrives for 10 s, a red
+note says so: the proxy has requested it, so the cause is upstream (provider, modem, cable).
+
+**My smart home devices show up as streams.**
+Discovery traffic stays local: UPnP/SSDP (239.255.255.250) and, since 1.5.0, CoAP
+(224.0.1.187, used by IKEA, Shelly and others) are never requested from the provider. To go
+further, *Settings > Channel names > Allow only these channels upstream* sets a group whitelist
+from your channel list. Set-top boxes may need groups that are not in a channel list
+(programme guide, updates), so test your TV afterwards.
+
 **How many streams and devices can it handle?**
 Plenty for a home with several TVs or a small office or event: every release build checks 100
 streams and 30 receivers that all report at once (`tools/scale-test.py`). As a stress test it

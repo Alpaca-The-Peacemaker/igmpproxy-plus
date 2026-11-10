@@ -115,6 +115,15 @@ return baseclass.extend({
 		return (channels && channels[ip]) ? '%s (%s)'.format(channels[ip], ip) : ip;
 	},
 
+	/* the /24 networks that hold the channels of a list, for a group whitelist */
+	whitelistFromChannels: function(map) {
+		var nets = {};
+		Object.keys(map || {}).forEach(function(ip) {
+			nets[ip.split('.').slice(0, 3).join('.') + '.0/24'] = true;
+		});
+		return Object.keys(nets).sort();
+	},
+
 	mbps: function(bps) {
 		if (bps == null)
 			return '…';
@@ -156,6 +165,11 @@ return baseclass.extend({
 						break;
 					}
 				}
+			}
+			else if (e.ev == 'first_packet' && e.delay_ms >= 3000) {
+				issues.push({ level: 'info', ts: e.ts, text:
+					_('%s took %.1f s to start after it was requested from the provider').format(
+						self.channelText(e.group, channels), e.delay_ms / 1000) });
 			}
 			else if (e.ev == 'host_timeout') {
 				for (var k = i + 1; k < ev.length; k++) {

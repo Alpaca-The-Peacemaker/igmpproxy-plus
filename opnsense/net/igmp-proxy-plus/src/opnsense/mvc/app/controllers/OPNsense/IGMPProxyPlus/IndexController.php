@@ -41,4 +41,9 @@ class IndexController extends \OPNsense\Base\IndexController
     {
         $this->view->pick('OPNsense/IGMPProxyPlus/status');
     }
+
+    public function eventsAction()
+    {
+        $this->view->pick('OPNsense/IGMPProxyPlus/events');
+    }
 }

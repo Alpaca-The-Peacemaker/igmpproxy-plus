@@ -49,5 +49,10 @@ const want = { '239.1.1.1': 'RTP 1', '239.1.1.2': 'SIC HD', '239.1.1.3': 'TVI', 
 const chOk = JSON.stringify(ch) === JSON.stringify(want);
 if (!chOk) console.log('channel parser got', ch);
 ok = ok && chOk;
+const wl = mod.whitelistFromChannels({ '239.195.5.36': 'a', '239.195.5.47': 'b', '239.196.6.19': 'c' });
+ok = ok && JSON.stringify(wl) === JSON.stringify(['239.195.5.0/24', '239.196.6.0/24']);
+const slow = mod.analyze([{ ts: ts(50), ev: 'first_packet', group: '239.1.1.1', delay_ms: 4200 },
+  { ts: ts(60), ev: 'first_packet', group: '239.1.1.2', delay_ms: 300 }], {}, { '239.1.1.1': 'RTP 1' }, 24);
+ok = ok && slow.length === 1 && /RTP 1 \(239\.1\.1\.1\) took 4\.2 s to start/.test(slow[0].text);
 console.log(ok ? 'LuCI helper tests passed' : 'LuCI helper tests FAILED');
 process.exit(ok ? 0 : 1);
