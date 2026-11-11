@@ -55,6 +55,7 @@ struct vifconfig {
     unsigned int        lastMemberQueryCount;
     unsigned int        groupTimeout;
     unsigned int        queryVersion;
+    int                 querierElection;   // -1 = use global
 
     // Keep allowed nets for VIF.
     struct SubnetList*  allowednets;
@@ -117,6 +118,8 @@ static void initCommonConfig(void) {
     commonConfig.eventLogSize = 1024 * 1024;
     commonConfig.eventLogReports = true;
     commonConfig.maxMemberships = 1024;
+    commonConfig.querierElection = false;
+    commonConfig.stallTimeout = 10000;
 
     // aimwang: default value
     commonConfig.defaultInterfaceState = IF_STATE_DISABLED;
@@ -142,6 +145,53 @@ void ifTuningDefaults(struct IfDesc *Dp) {
     Dp->lastMemberQueryCount = 0;
     Dp->groupTimeout = 0;
     Dp->queryVersion = 0;
+    Dp->querierElection = -1;
+    Dp->otherQuerier = 0;
+    Dp->otherQuerierUntil = 0;
+    Dp->otherLastGeneral = 0;
+    Dp->otherQueryInterval = 0;
+    Dp->otherMaxResp = 0;
+    Dp->otherRobustness = 0;
+}
+
+bool ifQuerierElection(const struct IfDesc *Dp) {
+    if (Dp && Dp->querierElection >= 0)
+        return Dp->querierElection > 0;
+    return commonConfig.querierElection;
+}
+
+/*
+ * While another querier is active, its timers count: a querier that asks
+ * less often than we would must not make our groups time out between its
+ * queries.
+ */
+static unsigned int ifRobustness(const struct IfDesc *Dp) {
+    unsigned int rv = (Dp && Dp->robustness) ? Dp->robustness : commonConfig.robustnessValue;
+    if (Dp && Dp->otherQuerierUntil && Dp->otherRobustness > rv)
+        rv = Dp->otherRobustness;
+    return rv;
+}
+
+static unsigned int ifQueryIntervalEff(const struct IfDesc *Dp) {
+    unsigned int qi = commonConfig.queryInterval;
+    if (Dp && Dp->otherQuerierUntil && Dp->otherQueryInterval > qi)
+        qi = Dp->otherQueryInterval;
+    return qi;
+}
+
+static unsigned int ifQueryResponseEff(const struct IfDesc *Dp) {
+    unsigned int qri = commonConfig.queryResponseInterval;
+    if (Dp && Dp->otherQuerierUntil && Dp->otherMaxResp > qri)
+        qri = Dp->otherMaxResp;
+    return qri;
+}
+
+/**
+ * Other Querier Present Interval (RFC 2236 8.5, RFC 3376 8.5):
+ * robustness * query interval + query response interval / 2.
+ */
+unsigned int ifOtherQuerierPresentInterval(const struct IfDesc *Dp) {
+    return ifRobustness(Dp) * ifQueryIntervalEff(Dp) + ifQueryResponseEff(Dp) / 2;
 }
 
 unsigned int ifQueryVersion(const struct IfDesc *Dp) {
@@ -176,8 +226,8 @@ unsigned int ifGroupMembershipInterval(const struct IfDesc *Dp) {
     unsigned int rv;
     if (Dp && Dp->groupTimeout)
         return Dp->groupTimeout;
-    rv = (Dp && Dp->robustness) ? Dp->robustness : commonConfig.robustnessValue;
-    return rv * commonConfig.queryInterval + commonConfig.queryResponseInterval;
+    rv = ifRobustness(Dp);
+    return rv * ifQueryIntervalEff(Dp) + ifQueryResponseEff(Dp);
 }
 
 const char *fastLeaveName(int mode) {
@@ -208,6 +258,15 @@ static unsigned int parseUInt(const char *key, const char *token,
         my_log(LOG_ERR, 0, "Config: '%s' must be %u..%u (got '%s')",
                key, min, max, token);
     return (unsigned int)v;
+}
+
+static bool parseOnOff(const char *key, const char *token) {
+    if (!strcmp(token, "on") || !strcmp(token, "1") || !strcmp(token, "yes"))
+        return true;
+    if (!strcmp(token, "off") || !strcmp(token, "0") || !strcmp(token, "no"))
+        return false;
+    my_log(LOG_ERR, 0, "Config: '%s' must be on or off (got '%s')", key, token);
+    return false;
 }
 
 /**
@@ -378,6 +437,12 @@ int loadConfig(char *configFile) {
         else if(strcmp("maxmemberships", token)==0) {
             commonConfig.maxMemberships = parseUInt(key, needValue(key), 0, 65535);
         }
+        else if(strcmp("querierelection", token)==0) {
+            commonConfig.querierElection = parseOnOff(key, needValue(key));
+        }
+        else if(strcmp("stalltimeout", token)==0) {
+            commonConfig.stallTimeout = parseTime(key, needValue(key), 0, 3600000);
+        }
         else if(strcmp("eventlogreports", token)==0) {
             token = needValue("eventlogreports");
             commonConfig.eventLogReports = !(!strcmp(token, "off") || !strcmp(token, "0") || !strcmp(token, "no"));
@@ -478,6 +543,7 @@ void configureVifs(void) {
                     Dp->lastMemberQueryCount = confPtr->lastMemberQueryCount;
                     Dp->groupTimeout = confPtr->groupTimeout;
                     Dp->queryVersion = confPtr->queryVersion;
+                    Dp->querierElection = confPtr->querierElection;
 
                     // Go to last allowed net on VIF...
                     for(vifLast = Dp->allowednets; vifLast->next; vifLast = vifLast->next);
@@ -521,6 +587,7 @@ struct vifconfig *parsePhyintToken(void) {
     tmpPtr->threshold = 1;
     tmpPtr->state = commonConfig.defaultInterfaceState;
     tmpPtr->fastLeave = FASTLEAVE_INHERIT;
+    tmpPtr->querierElection = -1;
 
     tmpPtr->name = strdup( token );
     if(tmpPtr->name == NULL) {
@@ -564,6 +631,12 @@ struct vifconfig *parsePhyintToken(void) {
         }
         else if(strcmp("disabled", token)==0) {
             tmpPtr->state = IF_STATE_DISABLED;
+        }
+        else if(strcmp("querier", token)==0) {
+            tmpPtr->state = IF_STATE_QUERIER;
+        }
+        else if(strcmp("querierelection", token)==0) {
+            tmpPtr->querierElection = parseOnOff(key, needValue(key)) ? 1 : 0;
         }
         else if(strcmp("ratelimit", token)==0) {
             tmpPtr->ratelimit = (int)parseUInt(key, needValue(key), 0, 1000000);

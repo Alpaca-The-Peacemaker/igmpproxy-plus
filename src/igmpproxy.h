@@ -132,6 +132,7 @@ void my_log( int Serverity, int Errno, const char *FmtSt, ... );
 #define IF_STATE_DOWNSTREAM    2   // Interface is a downstream interface
 #define IF_STATE_LOST          3   // aimwang: Temp from downstream to hidden
 #define IF_STATE_HIDDEN        4   // aimwang: Interface is hidden
+#define IF_STATE_QUERIER       5   // Query only: no forwarding, no upstream joins
 
 // Multicast default values...
 #define DEFAULT_ROBUSTNESS     2
@@ -180,6 +181,15 @@ struct IfDesc {
     unsigned int        lastMemberQueryCount;    /* 0 = use global */
     unsigned int        groupTimeout;            /* ms, 0 = computed GMI */
     unsigned int        queryVersion;            /* 2 or 3, 0 = use global */
+    int                 querierElection;         /* -1 = use global, 0 off, 1 on */
+    // Another querier with a lower address on this interface (election on):
+    // while otherQuerierUntil is set we send no general queries here.
+    uint32_t            otherQuerier;
+    msec_t              otherQuerierUntil;       /* 0 = we are the querier */
+    msec_t              otherLastGeneral;        /* its last general query */
+    unsigned int        otherQueryInterval;      /* ms, learned (QQIC or measured), 0 = unknown */
+    unsigned int        otherMaxResp;            /* ms, from its queries */
+    unsigned int        otherRobustness;         /* QRV from its IGMPv3 queries, 0 = unknown */
     unsigned char       threshold;   /* ttl limit */
     unsigned int        ratelimit;
     unsigned int        index;
@@ -213,6 +223,12 @@ struct Config {
     bool                eventLogReports;
     // raise net.ipv4.igmp_max_memberships to this (Linux), 0 = leave it
     unsigned int        maxMemberships;
+    // Querier election (RFC 2236 3, RFC 3376 6.6.2) on downstream and
+    // querier interfaces; off = always query (igmpproxy behaviour)
+    bool                querierElection;
+    // A forwarded stream that carried data and then has none for this
+    // long is reported as stalled (ms, 0 = off)
+    unsigned int        stallTimeout;
     //~ aimwang added
     // Set if nneed to detect new interface.
     unsigned short	rescanVif;
@@ -270,6 +286,8 @@ unsigned int ifLastMemberQueryInterval(const struct IfDesc *Dp);
 unsigned int ifLastMemberQueryCount(const struct IfDesc *Dp);
 unsigned int ifGroupMembershipInterval(const struct IfDesc *Dp);
 unsigned int ifQueryVersion(const struct IfDesc *Dp);
+bool ifQuerierElection(const struct IfDesc *Dp);
+unsigned int ifOtherQuerierPresentInterval(const struct IfDesc *Dp);
 const char *fastLeaveName(int mode);
 
 /* igmp.c
@@ -317,6 +335,9 @@ void acceptLeaveMessage(uint32_t src, uint32_t group);
 void sendGeneralMembershipQuery(void);
 void sendGeneralQueriesNow(const char *why);
 void sendGroupSpecificQuery(struct IfDesc *Dp, uint32_t group, int forceV2);
+void acceptQuery(uint32_t src, uint32_t group, const unsigned char *igmp, int len);
+msec_t querierTick(msec_t now);
+void querierGroupsJson(FILE *f, const struct IfDesc *Dp, msec_t now);
 
 /* control.c
  */

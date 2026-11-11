@@ -77,13 +77,96 @@ function channelSection(text) {
 	]);
 }
 
+/*
+ * "Add a TV network": a second upstream for providers that deliver TV on
+ * their own VLAN. Only stages UCI changes; nothing is applied until
+ * Save & Apply.
+ */
+function tvNetworkSection(chanNets) {
+	var open = function() {
+		var used = uci.sections('igmpproxy', 'phyint').map(function(p) { return p.network; });
+		var nets = uci.sections('network', 'interface').map(function(n) { return n['.name']; })
+			.filter(function(n) { return n != 'loopback' && used.indexOf(n) < 0; });
+		var zones = uci.sections('firewall', 'zone');
+		var zoneOf = function(net) {
+			var z = zones.filter(function(z) { return L.toArray(z.network).indexOf(net) >= 0; })[0];
+			return z ? z.name : '';
+		};
+
+		if (!nets.length) {
+			ui.addNotification(null, E('p', _('Every network is already used by the IGMP proxy. Create the TV VLAN interface first (Network > Interfaces).')), 'warning');
+			return;
+		}
+
+		var netSel = E('select', { 'class': 'cbi-input-select' }, nets.map(function(n) { return E('option', { 'value': n }, n); }));
+		var zoneSel = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': '' }, _('none')) ].concat(
+			zones.map(function(z) { return E('option', { 'value': z.name }, z.name); })));
+		var syncZone = function() { zoneSel.value = zoneOf(netSel.value); };
+		netSel.addEventListener('change', syncZone);
+		syncZone();
+		var srcIn = E('input', { 'class': 'cbi-input-text', 'type': 'text', 'value': '0.0.0.0/0', 'style': 'width:100%' });
+		var onlyCh = E('input', { 'type': 'checkbox', 'disabled': chanNets.length ? null : '' });
+		var notOthers = E('input', { 'type': 'checkbox', 'disabled': chanNets.length ? null : '' });
+
+		ui.showModal(_('Add a TV network'), [
+			E('p', {}, _('For providers that deliver TV on its own VLAN or interface, next to the internet one. The proxy then requests streams on both upstream interfaces, each limited by its own filters.')),
+			E('div', { 'class': 'cbi-value' }, [ E('label', { 'class': 'cbi-value-title' }, _('TV network')), E('div', { 'class': 'cbi-value-field' }, netSel) ]),
+			E('div', { 'class': 'cbi-value' }, [ E('label', { 'class': 'cbi-value-title' }, _('Firewall zone')), E('div', { 'class': 'cbi-value-field' }, zoneSel) ]),
+			E('div', { 'class': 'cbi-value' }, [ E('label', { 'class': 'cbi-value-title' }, _('Stream sources')), E('div', { 'class': 'cbi-value-field' }, [ srcIn,
+				E('div', { 'class': 'cbi-value-description' }, _('Networks the TV streams come from, separated by spaces. Ask your provider or use 0.0.0.0/0 (anywhere).')) ]) ]),
+			E('div', { 'class': 'cbi-value' }, [ E('label', { 'class': 'cbi-value-title' }, _('Channels')), E('div', { 'class': 'cbi-value-field' }, [
+				E('label', {}, [ onlyCh, ' ', _('Request only the channels of my channel list on this network') ]), E('br'),
+				E('label', {}, [ notOthers, ' ', _('Do not request these channels on the other upstream interfaces') ]),
+				chanNets.length ? '' : E('div', { 'class': 'cbi-value-description' }, _('Load a channel list under Channel names to use these options.')) ]) ]),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')), ' ',
+				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, function() {
+					var src = (srcIn.value || '').split(/[\s,]+/).filter(function(x) { return x; });
+					if (!src.length || src.some(function(x) { return !/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(x); })) {
+						ui.addNotification(null, E('p', _('Stream sources must be networks such as 10.0.0.0/8 or 0.0.0.0/0.')), 'warning');
+						return;
+					}
+					var sid = uci.add('igmpproxy', 'phyint');
+					uci.set('igmpproxy', sid, 'network', netSel.value);
+					uci.set('igmpproxy', sid, 'direction', 'upstream');
+					uci.set('igmpproxy', sid, 'altnet', src);
+					if (zoneSel.value)
+						uci.set('igmpproxy', sid, 'zone', zoneSel.value);
+					if (onlyCh.checked)
+						uci.set('igmpproxy', sid, 'whitelist', chanNets);
+					if (notOthers.checked)
+						uci.sections('igmpproxy', 'phyint').forEach(function(p) {
+							if (p['.name'] == sid || p.direction != 'upstream')
+								return;
+							var bl = L.toArray(p.blacklist);
+							chanNets.forEach(function(n) { if (bl.indexOf(n) < 0) bl.push(n); });
+							uci.set('igmpproxy', p['.name'], 'blacklist', bl);
+						});
+					return uci.save().then(function() {
+						ui.hideModal();
+						window.location.reload();
+					});
+				}) }, _('Add'))
+			])
+		]);
+	};
+
+	return E('div', { 'class': 'cbi-section' }, [
+		E('h3', {}, _('TV on its own network')),
+		E('div', { 'class': 'cbi-section-descr' }, _('Some providers deliver TV on a separate VLAN or interface. This adds it as a second upstream interface; nothing changes until you press Save & Apply.')),
+		E('button', { 'class': 'cbi-button cbi-button-add', 'click': ui.createHandlerFn(this, open) }, _('Add a TV network…'))
+	]);
+}
+
 return view.extend({
 	load: function() {
-		return Promise.all([uci.load('igmpproxy'), common.loadChannelText()]);
+		return Promise.all([uci.load('igmpproxy'), common.loadChannelText(),
+			L.resolveDefault(uci.load('network'), null), L.resolveDefault(uci.load('firewall'), null)]);
 	},
 
 	render: function(data) {
 		var m, s, o, channelText = data[1] || '';
+		var chanNets = common.whitelistFromChannels(common.parseChannels(channelText));
 
 		m = new form.Map('igmpproxy', _('IGMP Proxy'),
 			_('Multicast proxy with fine grained control over fast leave and the timers that decide how quickly multicast traffic stops after a leave.'));
@@ -197,6 +280,15 @@ return view.extend({
 		o.default = '1';
 		o.depends('event_log', '1');
 
+		o = s.taboption('advanced', form.Flag, 'querier_election', _('Querier election'),
+			_('Off (default): this router always sends the queries. On: if another router on the same network sends queries and has a lower address, this router lets it be the querier and only listens (RFC 2236/3376). It still checks by itself whether anyone wants a stream after a leave, so streams stop as quickly as before. Turn it on when another multicast router or a switch with an active querier shares the network.'));
+		o.default = '0';
+
+		o = s.taboption('advanced', form.Value, 'stall_timeout', _('Stalled stream alert (s)'),
+			_('A stream that devices receive and that carried data (at least 500 kbit/s) but has had none for this long is reported as stalled on the Status and Events pages. 0 = off.'));
+		o.datatype = 'range(0,3600)';
+		o.placeholder = '10';
+
 		o = s.taboption('advanced', form.ListValue, 'verbose', _('Log level'));
 		o.value('1', _('Warnings'));
 		o.value('2', _('Info (joins, leaves, fast leave)'));
@@ -226,6 +318,7 @@ return view.extend({
 		o = s.taboption('general', form.ListValue, 'direction', _('Direction'));
 		o.value('upstream', _('Upstream'));
 		o.value('downstream', _('Downstream'));
+		o.value('querier', _('Querier only (no forwarding)'));
 		o.rmempty = false;
 
 		o = s.taboption('general', widgets.ZoneSelect, 'zone', _('Firewall zone'),
@@ -254,18 +347,21 @@ return view.extend({
 		o.placeholder = _('general');
 		o.validate = validateRange(100, 25500, 'ms');
 		o.depends('direction', 'downstream');
+		o.depends('direction', 'querier');
 		o.modalonly = true;
 
 		o = s.taboption('leave', form.Value, 'last_member_count', _('Last member query count'));
 		o.datatype = 'range(1,10)';
 		o.placeholder = _('general');
 		o.depends('direction', 'downstream');
+		o.depends('direction', 'querier');
 		o.modalonly = true;
 
 		o = s.taboption('leave', form.Value, 'robustness', _('Robustness'));
 		o.datatype = 'range(1,7)';
 		o.placeholder = _('general');
 		o.depends('direction', 'downstream');
+		o.depends('direction', 'querier');
 		o.modalonly = true;
 
 		o = s.taboption('leave', form.ListValue, 'query_version', _('Query version'));
@@ -273,6 +369,16 @@ return view.extend({
 		o.value('3', _('IGMPv3'));
 		o.value('2', _('IGMPv2'));
 		o.depends('direction', 'downstream');
+		o.depends('direction', 'querier');
+		o.modalonly = true;
+
+		o = s.taboption('leave', form.ListValue, 'querier_election', _('Querier election'),
+			_('Whether this router gives way to another querier with a lower address on this network.'));
+		o.value('', _('Use general setting'));
+		o.value('1', _('On'));
+		o.value('0', _('Off (always query)'));
+		o.depends('direction', 'downstream');
+		o.depends('direction', 'querier');
 		o.modalonly = true;
 
 		o = s.taboption('leave', form.Value, 'group_timeout', _('Group membership timeout (s)'),
@@ -297,7 +403,46 @@ return view.extend({
 		o.datatype = 'cidr4';
 		o.modalonly = true;
 
+		/* simple choice over the options above (declared last, so it wins) */
+		o = s.taboption('general', form.ListValue, '_policy', _('What this network may request'),
+			_('Only the channel list: the provider is only asked for streams in the networks of your channel list (Settings > Channel names); set-top boxes may also need groups outside it (programme guide, updates), so check the TV afterwards. Nothing: this network only gets queries so its switches deliver multicast to the right ports (querier only, nothing is forwarded). Custom: the whitelist and blacklist on the Filters tab.'));
+		o.value('all', _('Everything (no filter)'));
+		if (chanNets.length)
+			o.value('channels', _('Only the channels of my channel list'));
+		o.value('none', _('Nothing from the provider (querier only)'));
+		o.value('custom', _('Custom (Filters tab)'));
+		o.depends('direction', 'downstream');
+		o.depends('direction', 'querier');
+		o.cfgvalue = function(sid) {
+			return common.policyOf(uci.get('igmpproxy', sid, 'direction'), uci.get('igmpproxy', sid, 'whitelist'),
+				uci.get('igmpproxy', sid, 'blacklist'), chanNets);
+		};
+		o.textvalue = function(sid) {
+			var d = uci.get('igmpproxy', sid, 'direction');
+			if (d != 'downstream' && d != 'querier')
+				return '-';
+			return { all: _('everything'), channels: _('channel list'), none: _('nothing (querier)'), custom: _('custom') }[this.cfgvalue(sid)];
+		};
+		o.write = function(sid, v) {
+			if (v == 'none') {
+				uci.set('igmpproxy', sid, 'direction', 'querier');
+				return;
+			}
+			if (uci.get('igmpproxy', sid, 'direction') == 'querier')
+				uci.set('igmpproxy', sid, 'direction', 'downstream');
+			if (v == 'all') {
+				uci.unset('igmpproxy', sid, 'whitelist');
+				uci.unset('igmpproxy', sid, 'blacklist');
+			}
+			else if (v == 'channels') {
+				uci.set('igmpproxy', sid, 'whitelist', chanNets);
+				uci.unset('igmpproxy', sid, 'blacklist');
+			}
+		};
+		o.remove = function() {};
+
 		return m.render().then(function(node) {
+			node.appendChild(tvNetworkSection(chanNets));
 			node.appendChild(channelSection(channelText));
 			return node;
 		});

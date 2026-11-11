@@ -1,5 +1,5 @@
 PLUGIN_NAME=		igmp-proxy-plus
-PLUGIN_VERSION=		1.5.1
+PLUGIN_VERSION=		1.6.0
 PLUGIN_COMMENT=		IGMP proxy with fast leave and multicast leave timer control
 PLUGIN_DEPENDS=		igmpproxy-plus
 PLUGIN_CONFLICTS=	igmp-proxy

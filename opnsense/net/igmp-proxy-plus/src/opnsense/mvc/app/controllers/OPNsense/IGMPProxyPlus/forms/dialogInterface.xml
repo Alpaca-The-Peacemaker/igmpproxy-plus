@@ -13,7 +13,7 @@
         <id>interface.direction</id>
         <label>Direction</label>
         <type>dropdown</type>
-        <help>Upstream faces the multicast source (WAN / IPTV VLAN). Downstream faces your devices (IPTV boxes, speakers, computers).</help>
+        <help>Upstream faces the multicast source (WAN / IPTV VLAN). Downstream faces your devices (IPTV boxes, speakers, computers). Querier only: this firewall only sends queries on that network, so its snooping switches deliver multicast to the right ports; nothing is forwarded to or from it (e.g. an IoT or camera VLAN).</help>
     </field>
     <field>
         <id>interface.description</id>
@@ -22,7 +22,7 @@
     </field>
     <field>
         <type>header</type>
-        <label>Leave behaviour (downstream only)</label>
+        <label>Leave behaviour (downstream and querier)</label>
     </field>
     <field>
         <id>interface.fastleave</id>
@@ -52,6 +52,12 @@
         <id>interface.query_version</id>
         <label>Query version</label>
         <type>dropdown</type>
+    </field>
+    <field>
+        <id>interface.querier_election</id>
+        <label>Querier election</label>
+        <type>dropdown</type>
+        <help>Whether this firewall gives way to another querier with a lower address on this network.</help>
     </field>
     <field>
         <id>interface.group_timeout</id>

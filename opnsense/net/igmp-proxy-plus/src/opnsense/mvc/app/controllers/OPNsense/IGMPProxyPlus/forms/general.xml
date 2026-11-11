@@ -99,6 +99,18 @@
         <help>By default UPnP discovery traffic is kept local and never joined upstream. Enable only if you really need SSDP from the upstream network.</help>
     </field>
     <field>
+        <id>igmpproxyplus.general.querier_election</id>
+        <label>Querier election</label>
+        <type>checkbox</type>
+        <help>Off (default): this firewall always sends the queries. On: if another router on the same network sends queries and has a lower address, this firewall lets it be the querier and only listens (RFC 2236/3376). It still checks by itself whether anyone wants a stream after a leave, so streams stop as quickly as before.</help>
+    </field>
+    <field>
+        <id>igmpproxyplus.general.stall_timeout</id>
+        <label>Stalled stream alert (s)</label>
+        <type>text</type>
+        <help>A stream that devices receive and that carried data (at least 500 kbit/s) but has had none for this long is reported as stalled on the Status and Events pages. 0 = off.</help>
+    </field>
+    <field>
         <id>igmpproxyplus.general.verbose</id>
         <label>Log level</label>
         <type>dropdown</type>

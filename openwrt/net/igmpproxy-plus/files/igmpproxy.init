@@ -63,6 +63,11 @@ igmp_header() {
 	emit_opt "$s" upstream_leave_delay upstreamleavedelay ms
 	emit_opt "$s" host_limit hostlimit
 	emit_opt "$s" query_version queryversion
+	emit_opt "$s" stall_timeout stalltimeout s
+
+	# querier election (off = always query, the classic behaviour)
+	config_get_bool querier_election "$s" querier_election 0
+	[ "$querier_election" = 1 ] && echo "querierelection on" >> "$CONFIGFILE"
 
 	# event log (JSON Lines): /tmp is RAM, so it never wears the flash
 	config_get_bool event_log "$s" event_log 1
@@ -81,7 +86,7 @@ igmp_header() {
 # --- interfaces ------------------------------------------------------------
 
 igmp_add_phyint() {
-	local s="$1" network direction device up status enabled
+	local s="$1" network direction device up status enabled qe
 
 	config_get_bool enabled "$s" enabled 1
 	[ "$enabled" = 1 ] || return 0
@@ -105,6 +110,8 @@ igmp_add_phyint() {
 		has_upstream=1
 		append updevs "$device"
 	fi
+	# querier: only sends queries (for snooping switches), forwards nothing
+	[ "$direction" = "querier" ] && has_querier=1
 
 	echo "" >> "$CONFIGFILE"
 	echo "phyint $device $direction" >> "$CONFIGFILE"
@@ -113,12 +120,22 @@ igmp_add_phyint() {
 
 	if [ "$direction" = "downstream" ]; then
 		emit_opt "$s" fastleave "	fastleave"
+		emit_opt "$s" group_timeout "	grouptimeout" s
+	fi
+	if [ "$direction" = "downstream" ] || [ "$direction" = "querier" ]; then
 		emit_opt "$s" robustness "	robustness"
 		emit_opt "$s" last_member_interval "	lastmemberinterval" ms
 		emit_opt "$s" last_member_count "	lastmembercount"
-		emit_opt "$s" group_timeout "	grouptimeout" s
 		emit_opt "$s" query_version "	queryversion"
+		config_get qe "$s" querier_election
+		case "$qe" in
+			1) echo "	querierelection on" >> "$CONFIGFILE" ;;
+			0) echo "	querierelection off" >> "$CONFIGFILE" ;;
+		esac
 	fi
+
+	# a querier network requests nothing, so its filters do not apply
+	[ "$direction" = "querier" ] && return 0
 
 	emit_list "$s" altnet altnet
 	emit_list "$s" whitelist whitelist
@@ -217,6 +234,7 @@ service_triggers() {
 
 start_service() {
 	has_upstream=
+	has_querier=
 	netdevs=
 	updevs=
 	logopts=
@@ -228,7 +246,7 @@ start_service() {
 	config_load igmpproxy
 	config_foreach igmp_header igmpproxy
 	config_foreach igmp_add_phyint phyint
-	[ -n "$has_upstream" ] || return 0
+	[ -n "$has_upstream" ] || [ -n "$has_querier" ] || return 0
 
 	if ! $PROG -t "$CONFIGFILE" >/dev/null 2>/tmp/igmpproxy.check; then
 		logger -t igmpproxy "configuration rejected: $(cat /tmp/igmpproxy.check)"

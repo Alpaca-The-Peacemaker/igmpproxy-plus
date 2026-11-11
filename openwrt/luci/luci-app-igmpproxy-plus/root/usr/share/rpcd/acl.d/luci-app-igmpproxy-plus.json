@@ -11,6 +11,9 @@
 				],
 				"/etc/igmpproxy-channels.m3u": [
 					"read"
+				],
+				"/sys/class/net/*/bridge/multicast_snooping": [
+					"read"
 				]
 			},
 			"ubus": {
@@ -22,7 +25,10 @@
 				]
 			},
 			"uci": [
-				"igmpproxy"
+				"igmpproxy",
+				"wireless",
+				"network",
+				"firewall"
 			]
 		},
 		"write": {

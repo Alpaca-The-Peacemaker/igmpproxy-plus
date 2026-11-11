@@ -270,7 +270,7 @@ int igmpProxyInit(void) {
     {
         unsigned Ix;
         struct IfDesc *Dp;
-        int     vifcount = 0, upsvifcount = 0;
+        int     vifcount = 0, upsvifcount = 0, downcount = 0, queriercount = 0;
 
         // init array to "not set"
         for ( Ix = 0; Ix < MAX_UPS_VIFS; Ix++)
@@ -293,14 +293,22 @@ int igmpProxyInit(void) {
                     }
                 }
 
+                // Querier interfaces get a VIF too: the kernel then hands
+                // their IGMP reports and leaves to us like on a downstream
+                // interface. No route ever forwards to or from them.
                 if (Dp->state != IF_STATE_DISABLED) {
                     addVIF( Dp );
                     vifcount++;
                 }
+                if (Dp->state == IF_STATE_DOWNSTREAM)
+                    downcount++;
+                if (Dp->state == IF_STATE_QUERIER)
+                    queriercount++;
             }
         }
 
-        if(0 == upsvifcount) {
+        // Only querier interfaces (no proxying) is a valid configuration.
+        if(0 == upsvifcount && (downcount > 0 || queriercount == 0)) {
             my_log(LOG_ERR, 0, "There must be at least 1 Vif as upstream.");
         }
     }
@@ -424,6 +432,11 @@ void igmpProxyRun(void) {
         now = now_ms();
         callout_run(now);
         nextRoute = routeTableTick(now);
+        {
+            msec_t q = querierTick(now);
+            if (q && (!nextRoute || q < nextRoute))
+                nextRoute = q;
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 <model>
     <mount>//OPNsense/igmpproxyplus</mount>
     <description>IGMP Proxy Plus</description>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <items>
         <general>
             <enabled type="BooleanField">
@@ -100,6 +100,17 @@
                     <debug value="3">Debug</debug>
                 </OptionValues>
             </verbose>
+            <querier_election type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </querier_election>
+            <stall_timeout type="IntegerField">
+                <Default>10</Default>
+                <Required>Y</Required>
+                <MinimumValue>0</MinimumValue>
+                <MaximumValue>3600</MaximumValue>
+                <ValidationMessage>Stalled stream alert must be between 0 and 3600 seconds.</ValidationMessage>
+            </stall_timeout>
         </general>
         <interfaces>
             <interface type="ArrayField">
@@ -116,8 +127,16 @@
                     <OptionValues>
                         <upstream>Upstream</upstream>
                         <downstream>Downstream</downstream>
+                        <querier>Querier only (no forwarding)</querier>
                     </OptionValues>
                 </direction>
+                <querier_election type="OptionField">
+                    <BlankDesc>Use general setting</BlankDesc>
+                    <OptionValues>
+                        <on value="1">On</on>
+                        <off value="0">Off (always query)</off>
+                    </OptionValues>
+                </querier_election>
                 <fastleave type="OptionField">
                     <BlankDesc>Use general setting</BlankDesc>
                     <OptionValues>

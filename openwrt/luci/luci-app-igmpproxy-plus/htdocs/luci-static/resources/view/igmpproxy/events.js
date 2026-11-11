@@ -17,10 +17,14 @@ function describe(e, names) {
 	case 'exit':
 		return _('Proxy stopped');
 	case 'join':
+		if (e.role === 'querier')
+			return _('%s wants this group (querier network: nothing is forwarded)').format(dev);
 		return _('%s joined (IGMPv%d)').format(dev, e.igmp);
 	case 'report':
 		return _('%s is still receiving').format(dev);
 	case 'leave':
+		if (e.role === 'querier')
+			return _('%s left (querier network: asking whether others still want it)').format(dev);
 		switch (e.action) {
 		case 'keeps': return _('%s left; still received by %d other device(s)').format(dev, e.others);
 		case 'checking': return _('%s left; checking whether another device still receives it (%s)').format(dev, secs(e.check_ms));
@@ -43,6 +47,14 @@ function describe(e, names) {
 		return _('%s uses IGMPv%d: IGMPv2 compatibility on').format(dev, e.igmp);
 	case 'upstream_join':
 		return _('Joined the stream from the provider');
+	case 'querier_lost':
+		return _('%s is the querier on this network now (lower address): this router stops its general queries').format(dev);
+	case 'querier_resumed':
+		return _('%s stopped asking: this router is the querier again').format(dev);
+	case 'stream_stalled':
+		return _('No data from the provider for %d s while devices receive this stream').format(e.silent_s);
+	case 'stream_resumed':
+		return _('Data from the provider again after %d s').format(e.stalled_s);
 	case 'first_packet':
 		return _('First data from the provider arrived after %s').format(secs(e.delay_ms));
 	case 'upstream_leave':
@@ -58,10 +70,13 @@ function describe(e, names) {
 }
 
 var IMPORTANT = { start: 1, exit: 1, join: 1, leave: 1, leave_answered: 1, forward_start: 1,
-	forward_stop: 1, host_timeout: 1, compat_v2: 1, upstream_join: 1, first_packet: 1, upstream_leave: 1, upstream_join_failed: 1 };
+	forward_stop: 1, host_timeout: 1, compat_v2: 1, upstream_join: 1, first_packet: 1, upstream_leave: 1, querier_lost: 1, querier_resumed: 1,
+	stream_stalled: 1, stream_resumed: 1, upstream_join_failed: 1 };
 
 function color(e) {
-	if (e.ev == 'forward_stop' || e.ev == 'host_timeout' || e.ev == 'upstream_join_failed') return '#c0392b';
+	if (e.ev == 'forward_stop' || e.ev == 'host_timeout' || e.ev == 'upstream_join_failed' || e.ev == 'stream_stalled') return '#c0392b';
+	if (e.ev == 'querier_lost' || e.ev == 'querier_resumed') return '#2e7bcf';
+	if (e.ev == 'stream_resumed') return '#2e9e44';
 	if (e.ev == 'leave') return '#e0a000';
 	if (e.ev == 'join' || e.ev == 'forward_start' || e.ev == 'leave_answered' || e.ev == 'first_packet') return '#2e9e44';
 	return '#888';
@@ -82,10 +97,18 @@ return view.extend({
 		this.filter = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'style': 'width:16em',
 			'placeholder': _('Filter: device, group, event...'), 'input': function() { self.update(); } });
 		this.routine = E('input', { 'type': 'checkbox', 'change': function() { self.update(); } });
+		/* one choice per network (interface) found in the log */
+		var ifs = {};
+		(this.data.events || []).forEach(function(e) { if (e['if']) ifs[e['if']] = true; });
+		this.iface = E('select', { 'class': 'cbi-input-select', 'change': function() { self.update(); } },
+			[ E('option', { 'value': '' }, _('All networks')) ].concat(Object.keys(ifs).sort().map(function(n) {
+				return E('option', { 'value': n }, n);
+			})));
 		this.body = E('div');
 
 		var toolbar = E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:.6em;align-items:center;margin-bottom:1em' }, [
 			this.filter,
+			Object.keys(ifs).length > 1 ? this.iface : '',
 			E('label', { 'style': 'white-space:nowrap' }, [ this.routine, ' ', _('Show routine reports and queries') ]),
 			E('button', { 'class': 'cbi-button', 'click': ui.createHandlerFn(this, 'reload') }, _('Reload')),
 			E('button', { 'class': 'cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'download') }, _('Download log'))
@@ -111,11 +134,13 @@ return view.extend({
 			return;
 		}
 		this.issues.replaceChildren(common.issueBox(common.analyze(d.events, names, channels, ISSUE_HOURS), ISSUE_HOURS));
-		var q = (this.filter.value || '').toLowerCase(), routine = this.routine.checked;
+		var q = (this.filter.value || '').toLowerCase(), routine = this.routine.checked, iface = this.iface.value;
 		var rows = [];
 		for (var i = d.events.length - 1; i >= 0 && rows.length < SHOW; i--) {
 			var e = d.events[i];
 			if (!routine && !IMPORTANT[e.ev])
+				continue;
+			if (iface && e['if'] && e['if'] !== iface)
 				continue;
 			var text = describe(e, names);
 			if (q && (text + ' ' + JSON.stringify(e) + ' ' + (names[e.host] || '') + ' ' + (channels[e.group] || '')).toLowerCase().indexOf(q) < 0)

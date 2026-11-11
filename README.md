@@ -212,6 +212,37 @@ further, *Settings > Channel names > Allow only these channels upstream* sets a 
 from your channel list. Set-top boxes may need groups that are not in a channel list
 (programme guide, updates), so test your TV afterwards.
 
+**Can it be the IGMP querier for a network without forwarding anything to it?**
+Yes, since 1.6.0: set the interface to *Querier only (no forwarding)* (OpenWrt: Settings >
+Interfaces > Direction; OPNsense: interface Direction; config: `phyint vlan30 querier`). The
+router then sends the queries the IGMP snooping switches on that network need, so cameras,
+speakers or AV gear there get multicast only on the ports that asked for it. Nothing is
+forwarded to or from that network and nothing is requested from the provider for it, and it
+works without any upstream interface. If another router or a switch on the same network is
+already the querier, switch on *Querier election* (off by default): the router with the lowest
+address then queries and this one only listens.
+
+**Networks with VLANs (IPTV, IoT, guests)**
+- Each network gets its own role and its own choice of what it may request (Settings >
+  Interfaces > Edit > *What this network may request*): everything, only your channel list,
+  or nothing (querier only).
+- TV on its own VLAN: *Settings > TV on its own network > Add a TV network* adds it as a
+  second upstream interface, optionally limited to your channel list. Since 1.6.0 each
+  stream gets its route from the upstream interface it really arrives on; before, a second
+  upstream whose sources overlapped the first (for example both with `altnet 0.0.0.0/0`)
+  never got its streams forwarded.
+- The Status page shows one block per network, with its devices, streams, bandwidth and
+  active querier, and warns when IGMP snooping is off on a bridge the streams go to or a
+  Wi-Fi network there has multicast-to-unicast switched off. The Events page can be
+  filtered by network.
+
+**A stream shows "no data from the provider". What does that mean?**
+Devices are receiving the stream, the router has requested it, and the provider stopped
+sending it (at least 10 s without data after it carried 500 kbit/s or more). Since 1.6.0 the
+proxy itself detects this, also when no browser is open, and writes `stream_stalled` and
+`stream_resumed` to the event log. The cause is upstream: the provider, the modem or the
+cable to it. Option `stalltimeout` (0 = off).
+
 **How many streams and devices can it handle?**
 Plenty for a home with several TVs or a small office or event: every release build checks 100
 streams and 30 receivers that all report at once (`tools/scale-test.py`). As a stress test it
@@ -231,7 +262,9 @@ more than a few hours.
 ```
 `ev` is one of `start`, `join`, `report`, `leave`, `leave_answered`, `forward_start`,
 `forward_stop` (with `reason`: `fast_leave`, `no_answer` or `timeout`), `host_timeout`,
-`compat_v2`, `upstream_join`, `upstream_leave`, `query` and `exit`. Times are UTC.
+`compat_v2`, `upstream_join`, `upstream_leave`, `first_packet`, `stream_stalled`,
+`stream_resumed`, `querier_lost`, `querier_resumed`, `query` and `exit`. On querier interfaces
+`join`, `report` and `leave` carry `"role":"querier"`. Times are UTC.
 
 **A device I did not expect (a robot vacuum, a TV, a speaker) shows up in the list. Why?**
 Many devices join multicast groups for discovery: UPnP/SSDP (239.255.255.250), mDNS (224.0.0.251)

@@ -65,8 +65,12 @@ jobs:
         run: sudo python3 tools/robustness-test.py "$PWD/src/igmpproxy"
       - name: Link-local groups (224.0.0.x) are never proxied
         run: sudo python3 tools/linklocal-test.py "$PWD/src/igmpproxy"
-      - name: Event log, refresh query and log rotation
+      - name: Event log, refresh query, log rotation and stalled streams
         run: sudo python3 tools/eventlog-test.py "$PWD/src/igmpproxy"
+      - name: Querier only role and querier election
+        run: sudo python3 tools/querier-test.py "$PWD/src/igmpproxy"
+      - name: Two upstream interfaces with overlapping sources
+        run: sudo python3 tools/multiupstream-test.py "$PWD/src/igmpproxy"
       - name: Capacity (100 streams, 30 receivers, all reporting at once)
         run: sudo python3 tools/scale-test.py "$PWD/src/igmpproxy" 100 30 20
 

@@ -21,6 +21,18 @@ from nstest import GROUP, RECV, SENDER, Proc, ns, setup, teardown  # noqa: E402
 
 SOCK = "/var/run/igmpproxy.sock"
 
+# about 1 Mbit/s: above the 500 kbit/s a stream needs before a stop counts
+# as a stall
+BIG_SENDER = f"""
+import socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 8)
+d = bytes(1300)
+while True:
+    s.sendto(d, ("{GROUP}", 5000))
+    time.sleep(0.01)
+"""
+
 
 def main():
     binary = sys.argv[1]
@@ -28,7 +40,7 @@ def main():
     log = os.path.join(tmp, "events.jsonl")
     conf = os.path.join(tmp, "igmpproxy.conf")
     with open(conf, "w") as f:
-        f.write(f"queryversion 3\nfastleave off\neventlog {log}\n"
+        f.write(f"queryversion 3\nfastleave off\neventlog {log}\nstalltimeout 4s\n"
                 "phyint u0 upstream\n  altnet 10.0.1.0/24\n"
                 "phyint br0 downstream\nphyint lo disabled\n")
     setup()
@@ -46,7 +58,8 @@ def main():
             if i == 1:
                 # the stream starts 1.5 s after the first join: the proxy
                 # must report that start delay (first_packet)
-                procs.append(Proc(f"nsenter --net=/run/netns/src python3 -c '{SENDER}' ev-sender", os.devnull))
+                snd = Proc(f"nsenter --net=/run/netns/src python3 -c '{SENDER}' ev-sender", os.devnull)
+                procs.append(snd)
                 time.sleep(1)
         os.killpg(rx[2].p.pid, signal.SIGUSR1)
         time.sleep(1)
@@ -104,6 +117,34 @@ def main():
             problems.append(f"first_packet events: {fp}")
         if not all("ts" in e and e["ts"].endswith("Z") for e in events):
             problems.append("event without a UTC timestamp")
+
+        # stalled stream: rx1 stays joined while a ~1 Mbit/s stream stops
+        # for 9 s (stalltimeout 4s), then comes back
+        snd.kill()
+        big = Proc(f"nsenter --net=/run/netns/src python3 -c '{BIG_SENDER}' ev-big", os.devnull)
+        procs.append(big)
+        time.sleep(5)
+        big.kill()
+        time.sleep(9)
+        st = json.loads(ns("rtr", f"{binary} -S {SOCK}"))
+        g = next((g for g in st["groups"] if g["group"] == GROUP), {})
+        if not g.get("stalled_ms", -1) >= 3000:
+            problems.append(f"stalled_ms while the stream is silent: {g.get('stalled_ms')}")
+        big2 = Proc(f"nsenter --net=/run/netns/src python3 -c '{BIG_SENDER}' ev-big", os.devnull)
+        procs.append(big2)
+        time.sleep(5)
+        st = json.loads(ns("rtr", f"{binary} -S {SOCK}"))
+        g = next((g for g in st["groups"] if g["group"] == GROUP), {})
+        if g.get("stalled_ms") != -1:
+            problems.append(f"stalled_ms after the stream came back: {g.get('stalled_ms')}")
+        ev2 = [json.loads(l) for l in ns("rtr", f"{binary} -E {SOCK}").splitlines() if l.startswith("{")]
+        stalled = [e for e in ev2 if e.get("ev") == "stream_stalled" and e.get("group") == GROUP]
+        resumed = [e for e in ev2 if e.get("ev") == "stream_resumed" and e.get("group") == GROUP]
+        if len(stalled) != 1 or len(resumed) != 1:
+            problems.append(f"stall events: stalled {stalled}, resumed {resumed}")
+        else:
+            print(f"stall: reported after {stalled[0].get('silent_s')} s, back after {resumed[0].get('stalled_s')} s")
+        big2.kill()
 
         # rotation: second proxy with a 1 KiB limit, 40 refresh queries
         procs[0].kill()

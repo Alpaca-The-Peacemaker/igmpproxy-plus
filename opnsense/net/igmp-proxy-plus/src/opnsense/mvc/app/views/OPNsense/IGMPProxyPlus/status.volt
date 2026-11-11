@@ -76,13 +76,14 @@
 
             let rows = '';
             st.interfaces.forEach(function (i) {
-                const ds = i.state === 'downstream';
+                const ds = i.state === 'downstream' || i.state === 'querier';
                 rows += '<tr><td>' + esc(i.name) + '</td><td>' + esc(i.address) + '</td><td>' + esc(i.state) + '</td><td>' +
                     (ds ? esc(i.fastleave) : '-') + '</td><td>' +
                     (ds ? i.last_member_query_count + ' x ' + i.last_member_query_interval_ms + ' ms' : '-') + '</td><td>' +
-                    (ds ? ms(i.group_membership_interval_ms) : '-') + '</td></tr>';
+                    (ds ? ms(i.group_membership_interval_ms) : '-') + '</td><td>' +
+                    (i.querier ? (i.querier === 'self' ? '{{ lang._('this firewall') }}' : esc(i.querier)) : '-') + '</td></tr>';
             });
-            $('#tbl-interfaces tbody').html(rows || '<tr><td colspan="6"><em>{{ lang._('No interfaces') }}</em></td></tr>');
+            $('#tbl-interfaces tbody').html(rows || '<tr><td colspan="7"><em>{{ lang._('No interfaces') }}</em></td></tr>');
 
             rows = '';
             st.groups.forEach(function (g) {
@@ -104,6 +105,9 @@
                 let up = g.upstream === 'joined'
                     ? (g.leave_in_ms >= 0 ? '{{ lang._('leaving in') }} ' + ms(g.leave_in_ms) : '{{ lang._('joined') }}')
                     : '{{ lang._('not joined') }}';
+                if (g.stalled_ms >= 0) {
+                    up += ' <span class="text-danger">{{ lang._('no data from the provider for') }} ' + ms(g.stalled_ms) + '</span>';
+                }
                 rows += '<tr><td><b>' + esc(g.group) + '</b></td><td>' + esc(g.sources.join(', ') || '-') + '</td><td>' + up +
                     '</td><td>' + (members || '<em>{{ lang._('no listeners') }}</em>') + '</td><td>' +
                     rate(g) + '</td><td>' + (g.start_delay_ms >= 0 ? ms(g.start_delay_ms) : '-') + '</td><td>' +
@@ -173,6 +177,7 @@
                 <th>{{ lang._('Fast leave') }}</th>
                 <th>{{ lang._('Last member queries') }}</th>
                 <th>{{ lang._('Membership timeout') }}</th>
+                <th>{{ lang._('Querier') }}</th>
             </tr>
             </thead>
             <tbody></tbody>

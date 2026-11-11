@@ -14,7 +14,7 @@ String.prototype.format = function() {
 };
 global._ = s => s;
 global.E = (tag, attrs, kids) => ({ tag, kids });
-global.L = { resolveDefault: p => p };
+global.L = { resolveDefault: p => p, toArray: v => v == null ? [] : Array.isArray(v) ? v : String(v).split(/\s+/).filter(x => x) };
 const rpc = { declare: () => () => Promise.resolve({}) };
 const baseclass = { extend: o => o };
 const mod = new Function('baseclass', 'fs', 'rpc', src)(baseclass, {}, rpc);
@@ -54,5 +54,41 @@ ok = ok && JSON.stringify(wl) === JSON.stringify(['239.195.5.0/24', '239.196.6.0
 const slow = mod.analyze([{ ts: ts(50), ev: 'first_packet', group: '239.1.1.1', delay_ms: 4200 },
   { ts: ts(60), ev: 'first_packet', group: '239.1.1.2', delay_ms: 300 }], {}, { '239.1.1.1': 'RTP 1' }, 24);
 ok = ok && slow.length === 1 && /RTP 1 \(239\.1\.1\.1\) took 4\.2 s to start/.test(slow[0].text);
+// 1.6.0: per network policy, networks, groups per network, stalls, network names
+const cn = ['239.195.5.0/24', '239.196.6.0/24'];
+const pol = [
+  mod.policyOf('querier', null, null, cn) === 'none',
+  mod.policyOf('downstream', null, null, cn) === 'all',
+  mod.policyOf('downstream', ['239.196.6.0/24', '239.195.5.0/24'], null, cn) === 'channels',
+  mod.policyOf('downstream', '239.195.5.0/24 239.196.6.0/24', null, cn) === 'channels',
+  mod.policyOf('downstream', cn, ['239.255.255.250/32'], cn) === 'custom',
+  mod.policyOf('downstream', ['239.1.1.0/24'], null, cn) === 'custom',
+  mod.policyOf('downstream', ['239.1.1.0/24'], null, []) === 'custom',
+];
+if (!pol.every(x => x)) console.log('policyOf', pol);
+ok = ok && pol.every(x => x);
+const st = { interfaces: [
+  { name: 'eth1', state: 'upstream' }, { name: 'br-lan', state: 'downstream' }, { name: 'br-iot', state: 'querier' }
+], groups: [
+  { group: '239.1.1.1', members: [{ interface: 'br-lan' }] },
+  { group: '239.1.1.2', members: [{ interface: 'br-tv' }] }
+] };
+const nets = mod.networksOf(st).map(i => i.name).join(',');
+const on = mod.groupsOn(st.groups, 'br-lan').map(g => g.group).join(',');
+ok = ok && nets === 'br-lan,br-iot' && on === '239.1.1.1' && mod.networksOf({}).length === 0;
+if (!(nets === 'br-lan,br-iot' && on === '239.1.1.1')) console.log('networks', nets, on);
+const ev3 = [
+  { ts: ts(10), ev: 'join', group: '239.1.1.1', if: 'br-lan', host: '192.168.1.84' },
+  { ts: ts(11), ev: 'join', group: '239.1.1.5', if: 'br-tv', host: '192.168.5.10' },
+  { ts: ts(20), ev: 'stream_stalled', group: '239.1.1.1', if: 'eth1', silent_s: 12 },
+  { ts: ts(300), ev: 'forward_stop', group: '239.1.1.5', if: 'br-tv', reason: 'timeout' },
+  { ts: ts(305), ev: 'join', group: '239.1.1.5', if: 'br-tv', host: '192.168.5.10' },
+];
+const is3 = mod.analyze(ev3, {}, { '239.1.1.1': 'RTP 1' }, 24);
+is3.forEach(i => console.log(i.level, '|', i.text));
+const stallOk = is3.some(i => /RTP 1 \(239\.1\.1\.1\): no data from the provider for 12 s/.test(i.text));
+const netOk = is3.some(i => /black screen \(network br-tv\)$/.test(i.text));
+if (!stallOk || !netOk) console.log('stall/network messages', stallOk, netOk);
+ok = ok && stallOk && netOk && is3.length === 2;
 console.log(ok ? 'LuCI helper tests passed' : 'LuCI helper tests FAILED');
 process.exit(ok ? 0 : 1);

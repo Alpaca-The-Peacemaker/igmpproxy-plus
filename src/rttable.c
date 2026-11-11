@@ -95,6 +95,13 @@ struct RouteTable {
     msec_t              joinRetryAt; // an upstream join failed: retry then
     msec_t              joinedAt;   // last successful upstream join
     int                 startDelay; // ms from that join to the first packet, -1 = not seen
+
+    // stalled stream detection (kernel byte counters, sampled every 2 s)
+    uint64_t            lastBytes;      // counter when it last grew
+    msec_t              lastBytesAt;    // when it last grew, 0 = no sample yet
+    msec_t              sampleAt;       // last sample
+    msec_t              stalledSince;   // data stopped then, 0 = not stalled
+    uint64_t            peakBps;        // highest bit rate seen while forwarding
     unsigned long       reports;
     unsigned long       leaves;
 
@@ -120,9 +127,10 @@ void initRouteTable(void) {
 
     routing_table = NULL;
 
-    // Join the all routers group on downstream vifs...
+    // Join the all routers group on downstream and querier vifs...
     for ( Ix = 0; (Dp = getIfByIx(Ix)); Ix++ ) {
-        if( Dp->InAdr.s_addr && ! (Dp->Flags & IFF_LOOPBACK) && Dp->state == IF_STATE_DOWNSTREAM) {
+        if( Dp->InAdr.s_addr && ! (Dp->Flags & IFF_LOOPBACK) &&
+            (Dp->state == IF_STATE_DOWNSTREAM || Dp->state == IF_STATE_QUERIER)) {
             my_log(LOG_DEBUG, 0, "Joining all-routers group %s on vif %s",
                          inetFmt(allrouters_group,s1),inetFmt(Dp->InAdr.s_addr,s2));
             k_join(Dp, allrouters_group);
@@ -645,6 +653,74 @@ static inline void minDeadline(msec_t *next, msec_t t) {
         *next = t;
 }
 
+#define STALL_SAMPLE_MS 2000
+#define STALL_MIN_BPS   500000      // below this it is not a TV stream
+
+/**
+*   Stalled stream: joined upstream, forwarded to members, carried at least
+*   500 kbit/s, and now the kernel byte counter has not moved for
+*   stalltimeout. The cause is upstream (provider, modem, cable): devices
+*   ask for the stream and the proxy requested it.
+*/
+static void stallCheck(struct RouteTable *r, msec_t now, msec_t *next) {
+    unsigned int timeout = getCommonConfig()->stallTimeout;
+    uint64_t total = 0, p, b;
+    int i, counted = 0;
+
+    if (!timeout || r->upstrState != ROUTESTATE_JOINED || !r->upstrJoined ||
+        !r->vifBits || r->upstrVif < 0) {
+        r->stalledSince = 0;
+        r->lastBytesAt = 0;
+        r->sampleAt = 0;
+        r->peakBps = 0;
+        return;
+    }
+    if (r->sampleAt && now - r->sampleAt < STALL_SAMPLE_MS) {
+        minDeadline(next, r->sampleAt + STALL_SAMPLE_MS);
+        return;
+    }
+    r->sampleAt = now;
+    minDeadline(next, now + STALL_SAMPLE_MS);
+
+    for (i = 0; i < MAX_ORIGINS; i++) {
+        if (r->originAddrs[i] && getSGCount(r->originAddrs[i], r->group, &p, &b) == 0) {
+            total += b;
+            counted = 1;
+        }
+    }
+    if (!counted)
+        return;
+
+    if (!r->lastBytesAt || total < r->lastBytes) {
+        r->lastBytes = total;
+        r->lastBytesAt = now;
+        return;
+    }
+    if (total > r->lastBytes) {
+        uint64_t bps = (total - r->lastBytes) * 8000 / (now - r->lastBytesAt);
+        if (bps > r->peakBps)
+            r->peakBps = bps;
+        if (r->stalledSince) {
+            unsigned int s = (unsigned int)((now - r->stalledSince) / 1000);
+            my_log(LOG_NOTICE, 0, "Group %s: data from the provider again after %us",
+                   inetFmt(r->group, s1), s);
+            eventLog("stream_resumed", r->group, getIfByVifIndex(r->upstrVif), 0,
+                     "\"stalled_s\":%u", s);
+            r->stalledSince = 0;
+        }
+        r->lastBytes = total;
+        r->lastBytesAt = now;
+    } else if (!r->stalledSince && r->peakBps >= STALL_MIN_BPS &&
+               now - r->lastBytesAt >= timeout) {
+        unsigned int s = (unsigned int)((now - r->lastBytesAt) / 1000);
+        struct IfDesc *up = getIfByVifIndex(r->upstrVif);
+        r->stalledSince = r->lastBytesAt;
+        my_log(LOG_WARNING, 0, "Group %s: no data from the provider on %s for %us, devices are still receiving it",
+               inetFmt(r->group, s1), up ? up->Name : "?", s);
+        eventLog("stream_stalled", r->group, up, 0, "\"silent_s\":%u", s);
+    }
+}
+
 /**
 *   Process all timers that are due. Returns the next deadline (absolute
 *   ms) or 0 if nothing is pending.
@@ -715,6 +791,7 @@ msec_t routeTableTick(msec_t now) {
         }
 
         syncRoute(r, now);
+        stallCheck(r, now, &next);
 
         if (r->leaveAt && r->leaveAt <= now)
             removeRoute(r);
@@ -819,11 +896,12 @@ void routeTableDumpJson(FILE *f, msec_t now) {
                "\"query_response_interval_ms\":%u,\"startup_query_interval_ms\":%u,"
                "\"last_member_query_interval_ms\":%u,\"last_member_query_count\":%u,"
                "\"fastleave\":\"%s\",\"upstream_leave_delay_ms\":%u,\"host_limit\":%u,"
-               "\"query_version\":%u},",
+               "\"query_version\":%u,\"querier_election\":%s,\"stall_timeout_ms\":%u},",
             conf->robustnessValue, conf->queryInterval, conf->queryResponseInterval,
             conf->startupQueryInterval, conf->lastMemberQueryInterval,
             conf->lastMemberQueryCount, fastLeaveName(conf->fastLeave),
-            conf->upstreamLeaveDelay, conf->hostLimit, conf->queryVersion);
+            conf->upstreamLeaveDelay, conf->hostLimit, conf->queryVersion,
+            conf->querierElection ? "true" : "false", conf->stallTimeout);
 
     fputs("\"interfaces\":[", f);
     first = 1;
@@ -834,6 +912,7 @@ void routeTableDumpJson(FILE *f, msec_t now) {
         switch (Dp->state) {
         case IF_STATE_UPSTREAM:   st = "upstream"; break;
         case IF_STATE_DOWNSTREAM: st = "downstream"; break;
+        case IF_STATE_QUERIER:    st = "querier"; break;
         case IF_STATE_DISABLED:   continue;
         default:                  st = "hidden"; break;
         }
@@ -841,13 +920,23 @@ void routeTableDumpJson(FILE *f, msec_t now) {
         jsonStr(f, Dp->Name);
         fprintf(f, ",\"address\":\"%s\",\"vif\":%d,\"state\":\"%s\"",
                 inetFmt(Dp->InAdr.s_addr, buf), (int)Dp->index, st);
-        if (Dp->state == IF_STATE_DOWNSTREAM)
+        if (Dp->state == IF_STATE_DOWNSTREAM || Dp->state == IF_STATE_QUERIER) {
+            fprintf(f, ",\"querier_election\":%s,\"querier\":",
+                    ifQuerierElection(Dp) ? "true" : "false");
+            if (Dp->otherQuerierUntil)
+                fprintf(f, "\"%s\"", inetFmt(Dp->otherQuerier, buf));
+            else
+                fputs("\"self\"", f);
+        }
+        if (Dp->state == IF_STATE_DOWNSTREAM || Dp->state == IF_STATE_QUERIER)
             fprintf(f, ",\"fastleave\":\"%s\",\"last_member_query_interval_ms\":%u,"
                        "\"last_member_query_count\":%u,\"group_membership_interval_ms\":%u,"
                        "\"query_version\":%u",
                     fastLeaveName(ifFastLeave(Dp)), ifLastMemberQueryInterval(Dp),
                     ifLastMemberQueryCount(Dp), ifGroupMembershipInterval(Dp),
                     ifQueryVersion(Dp));
+        if (Dp->state == IF_STATE_QUERIER)
+            querierGroupsJson(f, Dp, now);
         fputc('}', f);
         first = 0;
     }
@@ -861,9 +950,10 @@ void routeTableDumpJson(FILE *f, msec_t now) {
                 r == routing_table ? "" : ",", inetFmt(r->group, buf),
                 r->upstrState == ROUTESTATE_JOINED ? "joined" : "not-joined");
         if (up) jsonStr(f, up->Name); else fputs("null", f);
-        fprintf(f, ",\"age_ms\":%llu,\"reports\":%lu,\"leaves\":%lu,\"leave_in_ms\":%lld,\"start_delay_ms\":%d,\"sources\":[",
+        fprintf(f, ",\"age_ms\":%llu,\"reports\":%lu,\"leaves\":%lu,\"leave_in_ms\":%lld,\"start_delay_ms\":%d,\"stalled_ms\":%lld,\"sources\":[",
                 (unsigned long long)(now - r->created), r->reports, r->leaves,
-                remainMs(r->leaveAt, now), r->startDelay);
+                remainMs(r->leaveAt, now), r->startDelay,
+                r->stalledSince ? (long long)(now - r->stalledSince) : -1LL);
         {
             // kernel forwarding counters, summed over the sources; clients
             // turn two samples into a rate (Mbit/s per stream)

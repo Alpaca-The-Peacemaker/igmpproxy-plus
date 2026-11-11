@@ -115,6 +115,37 @@ return baseclass.extend({
 		return (channels && channels[ip]) ? '%s (%s)'.format(channels[ip], ip) : ip;
 	},
 
+	/* downstream and querier interfaces of a status object */
+	networksOf: function(st) {
+		return ((st && st.interfaces) || []).filter(function(i) {
+			return i.state === 'downstream' || i.state === 'querier';
+		});
+	},
+
+	/* streams with a member on one interface */
+	groupsOn: function(groups, ifname) {
+		return (groups || []).filter(function(g) {
+			return g.members.some(function(m) { return m.interface === ifname; });
+		});
+	},
+
+	/*
+	 * What a downstream network may request, from its UCI options:
+	 * 'none' (querier only), 'all' (no filter), 'channels' (whitelist =
+	 * the networks of the channel list) or 'custom'.
+	 */
+	policyOf: function(direction, whitelist, blacklist, channelNets) {
+		var wl = L.toArray(whitelist).slice().sort(), bl = L.toArray(blacklist);
+		var cn = (channelNets || []).slice().sort();
+		if (direction === 'querier')
+			return 'none';
+		if (!wl.length && !bl.length)
+			return 'all';
+		if (!bl.length && cn.length && wl.join(' ') === cn.join(' '))
+			return 'channels';
+		return 'custom';
+	},
+
 	/* the /24 networks that hold the channels of a list, for a group whitelist */
 	whitelistFromChannels: function(map) {
 		var nets = {};
@@ -145,6 +176,14 @@ return baseclass.extend({
 		var self = this, issues = [], since = Date.now() - (hours || 24) * 3600e3;
 		var ev = events.filter(function(e) { return Date.parse(e.ts) >= since; });
 		var dev = function(ip) { return names[ip] || ip; };
+		/* with several networks, say which one */
+		var nets = {};
+		ev.forEach(function(e) {
+			if ((e.ev == 'join' || e.ev == 'forward_start') && e['if'])
+				nets[e['if']] = true;
+		});
+		var multi = Object.keys(nets).length > 1;
+		var where = function(e) { return (multi && e['if']) ? ' ' + _('(network %s)').format(e['if']) : ''; };
 		var REASON = {
 			timeout: _('no device reported in time'),
 			no_answer: _('no device answered after a leave'),
@@ -161,10 +200,15 @@ return baseclass.extend({
 					if ((f.ev == 'forward_start' || f.ev == 'join') && f.group == e.group && f['if'] == e['if']) {
 						issues.push({ level: 'warn', ts: e.ts, text:
 							_('%s stopped (%s) and %s asked for it again %d s later: a viewer probably saw a black screen').format(
-								self.channelText(e.group, channels), REASON[e.reason] || e.reason, dev(f.host), Math.round(dt)) });
+								self.channelText(e.group, channels), REASON[e.reason] || e.reason, dev(f.host), Math.round(dt)) + where(e) });
 						break;
 					}
 				}
+			}
+			else if (e.ev == 'stream_stalled') {
+				issues.push({ level: 'warn', ts: e.ts, text:
+					_('%s: no data from the provider for %d s while devices were receiving it (the cause is upstream: provider, modem or cable)').format(
+						self.channelText(e.group, channels), e.silent_s) });
 			}
 			else if (e.ev == 'first_packet' && e.delay_ms >= 3000) {
 				issues.push({ level: 'info', ts: e.ts, text:
@@ -179,7 +223,7 @@ return baseclass.extend({
 					if (g.ev == 'join' && g.host == e.host && g.group == e.group) {
 						issues.push({ level: 'warn', ts: e.ts, text:
 							_('%s timed out on %s but joined again %d s later: its reports are getting lost (Wi-Fi, switch or a busy device)').format(
-								dev(e.host), self.channelText(e.group, channels), Math.round(dk)) });
+								dev(e.host), self.channelText(e.group, channels), Math.round(dk)) + where(e) });
 						break;
 					}
 				}

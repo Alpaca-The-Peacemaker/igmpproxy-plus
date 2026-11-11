@@ -109,7 +109,7 @@ void acceptIgmp(int recvlen) {
     struct igmp *igmp;
     struct igmpv3_report *igmpv3;
     struct igmpv3_grec *grec;
-    int ipdatalen, iphdrlen, ngrec, nsrcs, i;
+    int ipdatalen, iphdrlen, ngrec, nsrcs;
 
     if (recvlen < (int)sizeof(struct ip)) {
         my_log(LOG_WARNING, 0,
@@ -127,49 +127,44 @@ void acceptIgmp(int recvlen) {
      * necessary to install a route into the kernel for this.
      */
     if (ip->ip_p == 0) {
+        // Kernel upcall: the first packet of a flow without a route. The
+        // kernel says on which VIF it arrived; only flows that arrive on an
+        // upstream interface from one of its allowed networks get a route.
+        // (Earlier versions guessed the upstream from the source address,
+        // which picked the wrong one with several upstreams whose networks
+        // overlap, e.g. altnet 0.0.0.0/0 on an internet and an IPTV VLAN.)
+        struct igmpmsg *msg = (struct igmpmsg *)recv_buf;
+        struct IfDesc *inVIF;
+
         if (src == 0 || dst == 0) {
             my_log(LOG_WARNING, 0, "kernel request not accurate");
+            return;
         }
-        else {
-            struct IfDesc *checkVIF;
-
-            for(i=0; i<MAX_UPS_VIFS; i++)
-            {
-                if(-1 != upStreamIfIdx[i])
-                {
-                    // Check if the source address matches a valid address on upstream vif.
-                    checkVIF = getIfByIx( upStreamIfIdx[i] );
-                    if(checkVIF == 0) {
-                        my_log(LOG_ERR, 0, "Upstream VIF was null.");
-                        return;
-                    }
-                    else if(src == checkVIF->InAdr.s_addr) {
-                        my_log(LOG_DEBUG, 0, "Route activation request from %s for %s is from myself. Ignoring.",
-                            inetFmt(src, s1), inetFmt(dst, s2));
-                        return;
-                    }
-                    else if(!isAdressValidForIf(checkVIF, src)) {
-                        struct IfDesc *downVIF = getIfByAddress(src);
-                        if (downVIF && downVIF->state & IF_STATE_DOWNSTREAM) {
-                            my_log(LOG_DEBUG, 0, "The source address %s for group %s is from downstream VIF[%d]. Ignoring.",
-                                inetFmt(src, s1), inetFmt(dst, s2), i);
-                        } else {
-                            my_log(LINKLOCAL_SRC(src) ? LOG_INFO : LOG_WARNING, 0, "The source address %s for group %s, is not in any valid net for upstream VIF[%d].",
-                                inetFmt(src, s1), inetFmt(dst, s2), i);
-                        }
-                    } else {
-                        // Activate the route.
-                        int vifindex = checkVIF->index;
-                        my_log(LOG_DEBUG, 0, "Route activate request from %s to %s on VIF[%d]",
-                            inetFmt(src,s1), inetFmt(dst,s2), vifindex);
-                        activateRoute(dst, src, vifindex);
-                        i = MAX_UPS_VIFS;
-                    }
-                } else {
-                    i = MAX_UPS_VIFS;
-                }
-            }
+        if (msg->im_msgtype != IGMPMSG_NOCACHE) {
+            my_log(LOG_DEBUG, 0, "Ignoring kernel message type %d for %s from %s",
+                   msg->im_msgtype, inetFmt(dst, s1), inetFmt(src, s2));
+            return;
         }
+        inVIF = getIfByVifIndex(msg->im_vif);
+        if (inVIF == NULL || inVIF->state != IF_STATE_UPSTREAM) {
+            my_log(LOG_DEBUG, 0, "Multicast from %s to %s arrived on %s, not an upstream interface. Ignoring.",
+                   inetFmt(src, s1), inetFmt(dst, s2), inVIF ? inVIF->Name : "an unknown VIF");
+            return;
+        }
+        if (src == inVIF->InAdr.s_addr) {
+            my_log(LOG_DEBUG, 0, "Route activation request from %s for %s is from myself. Ignoring.",
+                   inetFmt(src, s1), inetFmt(dst, s2));
+            return;
+        }
+        if (!isAdressValidForIf(inVIF, src)) {
+            my_log(LINKLOCAL_SRC(src) ? LOG_INFO : LOG_WARNING, 0,
+                   "The source address %s for group %s is not in any allowed network (altnet) of upstream %s.",
+                   inetFmt(src, s1), inetFmt(dst, s2), inVIF->Name);
+            return;
+        }
+        my_log(LOG_DEBUG, 0, "Route activate request from %s to %s on %s (VIF %d)",
+               inetFmt(src, s1), inetFmt(dst, s2), inVIF->Name, (int)inVIF->index);
+        activateRoute(dst, src, inVIF->index);
         return;
     }
 
@@ -245,6 +240,7 @@ void acceptIgmp(int recvlen) {
         return;
 
     case IGMP_MEMBERSHIP_QUERY:
+        acceptQuery(src, igmp->igmp_group.s_addr, (const unsigned char *)igmp, ipdatalen);
         return;
 
     default:

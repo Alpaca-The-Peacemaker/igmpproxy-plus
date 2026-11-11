@@ -17,7 +17,8 @@ multicast daemon. It defines which network interfaces should be
 used by the routing daemon. Each interface must be give one of the following roles:
 .B upstream
 ,
-.B downstream
+.BR downstream ,
+.B querier
 or
 .B disabled
 .
@@ -25,12 +26,23 @@ or
 The
 .B upstream
 network interface is the outgoing interface which is responsible for communicating
-to available multicast data sources. There can only be one upstream interface.
+to available multicast data sources. Several upstream interfaces are allowed (for
+example the internet and a separate IPTV VLAN): a group is requested on every upstream
+interface whose whitelist and blacklist allow it, and a stream gets a route from the
+upstream interface it actually arrives on.
 
 .B Downstream
 network interfaces are the distribution interfaces to the destination networks, 
-where multicast clients can join groups and receive multicast data. One or more
-downstream interfaces must be configured.
+where multicast clients can join groups and receive multicast data. When there are
+downstream interfaces, at least one upstream interface must be configured.
+
+On a
+.B querier
+network interface igmpproxy only acts as the IGMP querier: it sends general queries,
+and after a leave group specific queries, so the IGMP snooping switches on that network
+deliver multicast only to the ports that asked for it. Nothing is forwarded to or from
+a querier interface and nothing is requested upstream for it. A configuration with only
+querier interfaces needs no upstream interface.
 
 On
 .B disabled
@@ -232,6 +244,30 @@ Also log the periodic reports of members that are already known and the
 periodic general queries. Default on.
 .RE
 
+.B querierelection
+.BR on | off
+.RS
+Querier election (RFC 2236 section 3, RFC 3376 section 6.6.2) on downstream and querier
+interfaces. Default off: igmpproxy always sends general queries. On: while another
+router with a lower address sends queries on an interface, igmpproxy sends no general
+queries there and uses the other querier's query interval and robustness for its
+membership timers; when that router has been silent for the Other Querier Present
+Interval (robustness x query interval + query response interval / 2) igmpproxy is the
+querier again and queries at once. On downstream interfaces igmpproxy still sends its
+own group specific queries after a leave, so how fast a stream stops does not depend on
+another router. Can also be set per phyint.
+.RE
+
+.B stalltimeout
+.I time
+.RS
+A forwarded stream that carried at least 500 kbit/s and then has no data for this long
+while members receive it is reported as stalled (event
+.BR stream_stalled ,
+.B stalled_ms
+in the status). Default 10s, 0 = off.
+.RE
+
 .B hashtablesize
 .I size
 .RS
@@ -267,7 +303,9 @@ The role of the interface. This should be either
 .B upstream
 (only one interface),
 .B downstream
-(one or more interfaces) or
+(one or more interfaces),
+.B querier
+(query only, nothing forwarded) or
 .B disabled
 \&. This option is required.
 .RE
